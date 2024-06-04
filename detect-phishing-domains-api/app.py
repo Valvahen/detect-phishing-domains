@@ -1,13 +1,15 @@
 from flask import jsonify, request, Flask
+import flask
 from flask_cors import CORS
 import pandas as pd
 from thefuzz import fuzz
 import requests
-from sklearn.feature_extraction.text import TfidfVectorizer
+import favicon
 from PIL import Image
 from io import BytesIO
 from bs4 import BeautifulSoup
-import favicon
+from sklearn.feature_extraction.text import TfidfVectorizer
+from skimage.metrics import structural_similarity as ssim
 import numpy as np
 
 app = Flask(__name__)
@@ -67,16 +69,21 @@ def fetch_image(url):
 
 def compare_images(image1, image2):
     try:
-        image1 = image1.convert('RGB')
-        image2 = image2.convert('RGB')
-        if image1.size != image2.size:
-            image2 = image2.resize(image1.size, Image.ANTIALIAS)
-        arr1 = np.array(image1)
-        arr2 = np.array(image2)
-        mse = np.mean((arr1 - arr2) ** 2)
-        max_pixel_value = 255.0
-        similarity = 100 - (mse / max_pixel_value * 100)
-        return max(0, similarity)
+        image1 = image1.convert('L')  # Convert to grayscale
+        image2 = image2.convert('L')  # Convert to grayscale
+        
+        # Convert images to numpy arrays
+        image1_np = np.array(image1)
+        image2_np = np.array(image2)
+        
+        # Resize images to the same size if necessary
+        if image1_np.shape != image2_np.shape:
+            image2_np = np.resize(image2_np, image1_np.shape)
+        
+        # Calculate SSIM between the two images
+        similarity_index, _ = ssim(image1_np, image2_np, full=True)
+        
+        return similarity_index * 100  # Return SSIM as percentage similarity
     except Exception as e:
         print(f"Error comparing images: {e}")
         return 0.0
@@ -96,15 +103,19 @@ def compare_titles(title1, title2):
     similarity = fuzz.ratio(title1, title2)
     return similarity
 
+@app.route('/flask-version')
+def show_flask_version():
+    return f"Flask Version: {flask.__version__}"
+
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv("whitelist.csv")
+    parent_data = pd.read_csv("whitelistSBI.csv")
     parent_domains = parent_data['domain'].values
 
-    threshold_ratio = 70
+    threshold_ratio = 0
     parent_child_dict = {}
 
     for parent in parent_domains:
@@ -112,36 +123,41 @@ def detect_phishing():
         for child in child_domains:
             ratio = fuzz.ratio(parent, child)
             if ratio >= threshold_ratio:
-                # Fetch content from parent and child domains
-                parent_content = extract_website_content(parent)
-                child_content = extract_website_content(child)
+                try:
+                    # Fetch content from parent and child domains
+                    parent_content = extract_website_content(parent)
+                    child_content = extract_website_content(child)
 
-                # Calculate text similarity
-                content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
+                    # Calculate text similarity
+                    content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
 
-                # Fetch and compare favicons
-                parent_favicon_url = get_favicon(parent)
-                child_favicon_url = get_favicon(child)
-                favicon_similarity = 0.0
-                if parent_favicon_url and child_favicon_url:
-                    parent_image = fetch_image(parent_favicon_url)
-                    child_image = fetch_image(child_favicon_url)
-                    if parent_image and child_image:
-                        favicon_similarity = compare_images(parent_image, child_image)
+                    # Fetch and compare favicons
+                    parent_favicon_url = get_favicon(parent)
+                    child_favicon_url = get_favicon(child)
+                    favicon_similarity = 0.0
+                    if parent_favicon_url and child_favicon_url:
+                        parent_image = fetch_image(parent_favicon_url)
+                        child_image = fetch_image(child_favicon_url)
+                        if parent_image and child_image:
+                            favicon_similarity = compare_images(parent_image, child_image)
 
-                # Fetch and compare titles
-                parent_title = get_title(parent)
-                child_title = get_title(child)
-                title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
+                    # Fetch and compare titles
+                    parent_title = get_title(parent)
+                    child_title = get_title(child)
+                    title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
 
-                overall_similarity = (content_similarity + favicon_similarity + title_similarity) / 3
+                    overall_similarity = (content_similarity + favicon_similarity + title_similarity) / 3
 
-                matching_children.append((child, {
-                    'content_similarity': content_similarity,
-                    'favicon_similarity': favicon_similarity,
-                    'title_similarity': title_similarity,
-                    'overall_similarity': overall_similarity
-                }))
+                    matching_children.append((child, {
+                        'content_similarity': content_similarity,
+                        'favicon_similarity': favicon_similarity,
+                        'title_similarity': title_similarity,
+                        'overall_similarity': overall_similarity
+                    }))
+                except Exception as e:
+                    error_message = f"Error processing {parent} and {child}: {e}"
+                    matching_children.append((child, {'error': error_message}))
+                    print(error_message)
         
         if matching_children:
             parent_child_dict[parent] = matching_children
