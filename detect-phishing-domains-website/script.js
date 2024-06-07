@@ -68,7 +68,7 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
         
         // Create table header
         const headerRow = document.createElement('tr');
-        const headers = ['Child Domain', 'Content Similarity (%)', 'Favicon Similarity (%)', 'Title Similarity (%)', 'Overall Similarity (%)'];
+        const headers = ['Child Domain', 'Domain Similarity (%)', 'Content Similarity (%)', 'Favicon Similarity (%)', 'Title Similarity (%)'];
         headers.forEach(headerText => {
             const headerCell = document.createElement('th');
             headerCell.textContent = headerText;
@@ -81,27 +81,18 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
             const childRow = document.createElement('tr');
             const childData = [
                 shortenURL(child[0]), // Shortened Child Domain
-                child[1].content_similarity === 'NA' ? 'NA' : child[1].content_similarity.toFixed(2), // Content Similarity
-                child[1].favicon_similarity === 'NA' ? 'NA' : child[1].favicon_similarity.toFixed(2), // Favicon Similarity
-                child[1].title_similarity === 'NA' ? 'NA' : child[1].title_similarity.toFixed(2), // Title Similarity
-                child[1].overall_similarity === 'NA' ? 'NA' : child[1].overall_similarity.toFixed(2) // Overall Similarity
+                child[1].domain_similarity === -1 ? 'NA' : child[1].domain_similarity.toFixed(2), // Domain Similarity
+                child[1].content_similarity === -1 ? 'NA' : child[1].content_similarity.toFixed(2), // Content Similarity
+                child[1].favicon_similarity === -1 ? 'NA' : child[1].favicon_similarity.toFixed(2), // Favicon Similarity
+                child[1].title_similarity === -1 ? 'NA' : child[1].title_similarity.toFixed(2) // Title Similarity
             ];
             childData.forEach(cellData => {
                 const cell = document.createElement('td');
                 cell.textContent = cellData;
                 childRow.appendChild(cell);
             });
-            // Add color based on overall similarity
-            const overallSimilarity = child[1].overall_similarity;
-            if (overallSimilarity >= 0 && overallSimilarity <= 30) {
-                childRow.classList.add('light-green');
-            } else if (overallSimilarity > 30 && overallSimilarity <= 60) {
-                childRow.classList.add('yellow');
-            } else if (overallSimilarity > 60) {
-                childRow.classList.add('red');
-            }
             childrenTable.appendChild(childRow);
-        });
+        });        
 
         parentElement.appendChild(childrenTable);
         resultsContainer.appendChild(parentElement);
