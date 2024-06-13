@@ -5,18 +5,18 @@ import os
 from pandas import *
 
 session = requests.Session()
-img_out_dir = "./favicons_wl/"
+session.verify = False
+img_out_dir = r"detect-phishing-domains-main\detect-phishing-domains-api\favicons_wl"
 
 
 def download_favicon(url, filename=None):
-    url = "https://"+url
     parsed_url = urlparse(url)
 
     if not filename:
         # use second-level domain (SLD) for filename
         filename = parsed_url.netloc
     # check if favicon already exists
-    favicon_output_filename = img_out_dir + filename + ".ico"
+    favicon_output_filename = os.path.join(img_out_dir, filename + ".ico")
     if os.path.exists(favicon_output_filename):
         print(favicon_output_filename + " already exists!")
         return
@@ -24,19 +24,22 @@ def download_favicon(url, filename=None):
     # get url without path
     url = parsed_url.scheme + "://" + parsed_url.netloc
     print(url)
-    response = session.get(url)
+    try:
+        response = session.get(url)
 
-    # parse and get the favicon URL from the HTML content
-    soup = BeautifulSoup(response.content, "html.parser")
-    favicon_url = get_favicon_url_from_html(soup, url)
+        # parse and get the favicon URL from the HTML content
+        soup = BeautifulSoup(response.content, "html.parser")
+        favicon_url = get_favicon_url_from_html(soup, url)
 
-    if favicon_url:
-        # download the favicon
-        response = session.get(favicon_url)
-        with open(favicon_output_filename, "wb") as f:
-            f.write(response.content)
-    else:
-        print("Could not find favicon URL")
+        if favicon_url:
+            # download the favicon
+            response = session.get(favicon_url)
+            with open(favicon_output_filename, "wb") as f:
+                f.write(response.content)
+        else:
+            print("Could not find favicon URL")
+    except Exception as e:
+        print(f"Error fetching favicon for {url}: {e}")
 
 
 def get_favicon_url_from_html(soup, url):
@@ -56,8 +59,7 @@ def download_favicons(links):
 
 
 if __name__ == "__main__":
-    # urls = ["https://www.sci.gov.in", "https://crsorgi.gov.in"]
-    data = read_csv("whitelist2.csv")
-    urls = data['domain'].tolist()
+    urls = ["http://checkpethome.com/", "https://crsorgi.gov.in"]
+    # data = read_csv(r"detect-phishing-domains-main\detect-phishing-domains-api\whitelist.csv")
+    # urls = data['domain'].tolist()
     download_favicons(urls)
-    # print(urls)
