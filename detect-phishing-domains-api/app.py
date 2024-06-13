@@ -234,7 +234,8 @@ def get_title(url):
     if url in title_cache:
         return title_cache[url]
     try:
-        response = requests.get(url,timeout=2)
+        # Attempt to fetch title with HTTPS
+        response = requests.get(url, timeout=2)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         title = soup.title.string.strip() if soup.title else 'No title found'
@@ -243,6 +244,11 @@ def get_title(url):
         return title
     except Exception as e:
         print(f"Error fetching title from {url}: {e}")
+
+        # If HTTPS fails, attempt with HTTP
+        if url.startswith('https://'):
+            http_url = 'http://' + url[len('https://'):]
+            return get_title(http_url)
         return 'No title found'
 
 def compare_titles(title1, title2, n=2):
