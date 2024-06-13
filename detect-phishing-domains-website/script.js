@@ -68,7 +68,7 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
         
         // Create table header
         const headerRow = document.createElement('tr');
-        const headers = ['Child Domain', 'Domain Similarity (%)', 'Content Similarity (%)', 'Favicon Similarity (%)', 'Title Similarity (%)'];
+        const headers = ['Child Domain', 'Domain Similarity (%)', 'Content Similarity (%)',  'Title Similarity (%)'];
         headers.forEach(headerText => {
             const headerCell = document.createElement('th');
             headerCell.textContent = headerText;
@@ -83,7 +83,7 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
                 shortenURL(child[0]), // Shortened Child Domain
                 child[1].domain_similarity === -1 ? 'NA' : child[1].domain_similarity.toFixed(2), // Domain Similarity
                 child[1].content_similarity === -1 ? 'NA' : child[1].content_similarity.toFixed(2), // Content Similarity
-                child[1].favicon_similarity === -1 ? 'NA' : child[1].favicon_similarity.toFixed(2), // Favicon Similarity
+                // child[1].favicon_similarity === -1 ? 'NA' : child[1].favicon_similarity.toFixed(2), // Favicon Similarity
                 child[1].title_similarity === -1 ? 'NA' : child[1].title_similarity.toFixed(2) // Title Similarity
             ];
             childData.forEach(cellData => {
