@@ -83,9 +83,12 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
                 shortenURL(child[0]), // Shortened Child Domain
                 child[1].domain_similarity === -1 ? 'NA' : child[1].domain_similarity.toFixed(2), // Domain Similarity
                 child[1].content_similarity === -1 ? 'NA' : child[1].content_similarity.toFixed(2), // Content Similarity
-                // child[1].favicon_similarity === -1 ? 'NA' : child[1].favicon_similarity.toFixed(2), // Favicon Similarity
                 child[1].title_similarity === -1 ? 'NA' : child[1].title_similarity.toFixed(2) // Title Similarity
             ];
+
+            // Add background color based on thresholds
+            childRow.style.backgroundColor = getRowColor(child[1]);
+
             childData.forEach(cellData => {
                 const cell = document.createElement('td');
                 cell.textContent = cellData;
@@ -99,6 +102,28 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
     }
 }
 
+function getRowColor(similarityData) {
+    // Define your threshold values here
+    const domainThreshold = 90;
+    const contentThreshold = 80;
+    const titleThreshold = 80;
+
+    // Determine which threshold to use based on available data
+    const domainSimilarity = similarityData.domain_similarity !== -1 ? similarityData.domain_similarity : 0;
+    const contentSimilarity = similarityData.content_similarity !== -1 ? similarityData.content_similarity : 0;
+    const titleSimilarity = similarityData.title_similarity !== -1 ? similarityData.title_similarity : 0;
+
+    // Determine the color based on the threshold
+    if (domainSimilarity >= domainThreshold || contentSimilarity >= contentThreshold || titleSimilarity >= titleThreshold) {
+        return 'red'; // or any color you prefer for a high similarity
+    } else if (domainSimilarity >= 50 || contentSimilarity >= 50 || titleSimilarity >= 50) {
+        return 'yellow'; // or any color you prefer for moderate similarity
+    } else {
+        return 'green'; // or any color you prefer for low similarity
+    }
+}
+
+
 function shortenURL(url) {
     const maxLength = 40; // Maximum length for the shortened URL
     if (url.length <= maxLength) {
@@ -106,3 +131,4 @@ function shortenURL(url) {
     }
     return url.substr(0, maxLength - 3) + '...'; // Truncate URL and add ellipsis
 }
+
