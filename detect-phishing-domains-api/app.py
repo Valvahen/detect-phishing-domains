@@ -160,13 +160,13 @@ def calculate_domain_similarity(parent, child):
     if not parent or not child:
         return -1
     try:
-        # Convert domain strings to lowercase
-        parent_lower = parent.lower()
-        child_lower = child.lower()
+        # Remove "www" prefix if present
+        parent = parent.lower().replace("www.", "")
+        child = child.lower().replace("www.", "")
 
         # Calculate positional Jaccard similarity
-        parent_set = set(parent_lower)
-        child_set = set(child_lower)
+        parent_set = set(parent)
+        child_set = set(child)
         intersection_count = len(parent_set.intersection(child_set))
         union_count = len(parent_set.union(child_set))
 
