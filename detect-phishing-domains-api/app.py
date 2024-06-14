@@ -3,23 +3,14 @@ from flask_cors import CORS
 import pandas as pd
 from thefuzz import fuzz
 import requests
-import favicon
-from PIL import Image
-from io import BytesIO
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
-from skimage.metrics import structural_similarity as ssim
 from sklearn.metrics.pairwise import cosine_similarity
 from nltk.tokenize import word_tokenize
 import textdistance
 import nltk
-import subprocess
-import os
-from urllib.parse import urlparse
-import re
+import concurrent.futures
 import ssl
-from requests.exceptions import InvalidURL
-import requests.exceptions
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -32,15 +23,12 @@ nltk.download('punkt')
 session = requests.Session()
 session.verify = False
 
-# img_out_dir = r"detect-phishing-domains-main\detect-phishing-domains-api\favicons_bl"
-
 app = Flask(__name__)
 CORS(app)
 
 # Define dictionaries to store cached data
 content_cache = {}
 title_cache = {}
-# favicon_cache = {}
 
 # Function to ensure URLs start with http:// or https://
 def ensure_http(url):
@@ -95,7 +83,6 @@ def extract_website_content(url):
         print(f"Error fetching content from {url}: {e}")
         return "No content found"
 
-
 def clean_text(text):
     # Remove extra spaces and newlines
     text = ' '.join(text.split())
@@ -107,7 +94,6 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
     if paragraph1 == "No content found" or paragraph2 == "No content found":
         return -1
     try:
-
         # Detect languages of the paragraphs
         lang_paragraph1 = detect(paragraph1)
         lang_paragraph2 = detect(paragraph2)
@@ -138,97 +124,6 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
         print(f"Error calculating similarity: {e}")
         return -1
 
-# Function to fetch and cache favicon
-# def get_favicon(url):
-#     url = "https://" + url
-#     if url in favicon_cache:
-#         return favicon_cache[url]
-#     try:
-#         icons = favicon.get(url)
-#         if not icons:
-#             favicon_cache[url] = None
-#             return None
-#         favicon_url = icons[0].url
-#         response = requests.get(favicon_url)
-#         image = Image.open(BytesIO(response.content))
-        
-#         # Resize favicon to a standard size for comparison
-#         image = image.resize((32, 32))
-        
-#         # Convert to grayscale for structural similarity comparison
-#         image = image.convert('L')
-        
-#         # Save favicon temporarily for comparison
-#         filename = f"favicons/favicon_{url.replace('http://', '').replace('https://', '').replace('/', '_')}.png"
-#         image.save(filename)
-        
-#         favicon_cache[url] = filename
-#         return filename
-#     except Exception as e:
-#         print(f"Error fetching favicon from {url}: {e}")
-#         return None
-
-
-# # Function to fetch and cache image
-# def fetch_image(url):
-#     if url in favicon_cache:
-#         return favicon_cache[url]
-#     try:
-#         response = requests.get(url, stream=True)
-#         response.raise_for_status()
-#         image = Image.open(BytesIO(response.content))
-        
-#         # Resize image to a standard size for comparison
-#         image = image.resize((32, 32))
-        
-#         # Convert to grayscale for structural similarity comparison
-#         image = image.convert('L')
-        
-#         # Save image temporarily for comparison
-#         filename = f"images/image_{url.replace('http://', '').replace('https://', '').replace('/', '_')}.png"
-#         image.save(filename)
-        
-#         favicon_cache[url] = filename
-#         return filename
-#     except Exception as e:
-#         print(f"Error fetching image from {url}: {e}")
-#         return None
-
-# import subprocess
-
-# def compare_images(parent_image, child_image):
-#     try:
-#         # Define the command to compare images using ImageMagick
-#         command = f"magick compare -metric RMSE {parent_image} {child_image} null: 2>&1"
-        
-#         # Execute the command and capture the output
-#         output = subprocess.run(command, shell=True, capture_output=True, text=True)
-        
-#         # Check if stdout exists
-#         if hasattr(output, 'stdout') and output.stdout:
-#             # Extract similarity metric from within parentheses
-#             similarity_match = re.search(r'\((.*?)\)', output.stdout)
-#             if similarity_match:
-#                 similarity_str = similarity_match.group(1)
-#                 similarity_rmse = float(similarity_str)
-#             else:
-#                 raise ValueError("Similarity metric not found in output")
-            
-#             normalized_rmse = similarity_rmse * 100
-            
-#             # Calculate similarity percentage (higher values indicate more similarity)
-#             similarity_percentage = 100 - normalized_rmse
-            
-#             return similarity_percentage
-#         else:
-#             # If stdout doesn't exist or is empty, print the stderr output for debugging purposes
-#             print("Error occurred:", output.stderr)
-#             return -1
-#     except Exception as e:
-#         print("Error comparing images:", e)
-#         return -1
-    
-# Function to fetch and cache title
 def get_title(url):
     url = ensure_http(url)
     if url in title_cache:
@@ -288,67 +183,18 @@ def calculate_domain_similarity(parent, child):
         print(f"Error calculating domain similarity: {e}")
         return -1
     
-import requests.exceptions
-
-# def download_favicon(url, filename=None):
-#     parsed_url = urlparse(url)
-
-#     if not filename:
-#         # use second-level domain (SLD) for filename
-#         filename = parsed_url.netloc
-#     # check if favicon already exists
-#     favicon_output_filename = os.path.join(img_out_dir, filename + ".ico")
-#     if os.path.exists(favicon_output_filename):
-#         print(favicon_output_filename + " already exists!")
-#         return
-
-#     # get url without path
-#     url = parsed_url.scheme + "://" + parsed_url.netloc
-#     print(url)
-#     try:
-#         response = session.get(url)
-
-#         # parse and get the favicon URL from the HTML content
-#         soup = BeautifulSoup(response.content, "html.parser")
-#         favicon_url = get_favicon_url_from_html(soup, url)
-
-#         if favicon_url:
-#             # download the favicon
-#             response = session.get(favicon_url)
-#             with open(favicon_output_filename, "wb") as f:
-#                 f.write(response.content)
-#         else:
-#             print("Could not find favicon URL")
-#     except (requests.exceptions.SSLError, ssl.SSLEOFError) as e:
-#         print(f"Error fetching favicon for {url}: {e}")
-#         print("Skipping this site.")
-#     except requests.exceptions.ProxyError as e:
-#         print(f"ProxyError occurred: {e}")
-#         print("Skipping this site.")
-
-# def get_favicon_url_from_html(soup, url):
-#     favicon_url = None
-#     for link in soup.find_all("link", {"rel": ["shortcut icon", "icon"]}):
-#         favicon_url = link.get("href")
-#         break
-#     if favicon_url and not favicon_url.startswith("http"):
-#         favicon_url = url + favicon_url
-
-#     return favicon_url
-
-# def download_favicons(links):
-#     for i, link in enumerate(links, start=1):
-#         ensure_http(link)
-#         print(f"Iteration no: {i}, URL: {link}")
-#         download_favicon(link)
-
 def fetch_domain_data(domains):
     domain_data = {}
-    for domain in domains:
-        content = extract_website_content(domain)
-        title = get_title(domain)
-        domain_data[domain] = {'content': content, 'title': title}
-        print(f"done for {domain}")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_domain = {executor.submit(extract_website_content, domain): domain for domain in domains}
+        for future in concurrent.futures.as_completed(future_to_domain):
+            domain = future_to_domain[future]
+            try:
+                content = future.result()
+                title = get_title(domain)
+                domain_data[domain] = {'content': content, 'title': title}
+            except Exception as e:
+                print(f"Error fetching data for {domain}: {e}")
     return domain_data
 
 @app.route('/', methods=['POST'])
@@ -356,7 +202,7 @@ def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv(r"detect-phishing-domains-main\detect-phishing-domains-api\whitelist.csv")
+    parent_data = pd.read_csv(r".\whitelist.csv")
     parent_domains = parent_data['domain'].values
 
     threshold_ratio = 0
@@ -411,14 +257,6 @@ def detect_phishing():
             parent_child_dict[parent] = matching_children
 
     return jsonify(parent_child_dict)
-
-def fetch_domain_data(domains):
-    domain_data = {}
-    for domain in domains:
-        content = extract_website_content(domain)
-        title = get_title(domain)
-        domain_data[domain] = {'content': content, 'title': title}
-    return domain_data
 
 if __name__ == "__main__":
     app.run()
