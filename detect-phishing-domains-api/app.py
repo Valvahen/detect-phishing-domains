@@ -54,7 +54,7 @@ def extract_website_content(url):
     if url in content_cache:
         return content_cache[url]
     try:
-        response = requests.get(url, timeout=2)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             content = response.text
             soup = BeautifulSoup(content, 'html.parser')
@@ -130,7 +130,7 @@ def get_title(url):
         return title_cache[url]
     try:
         # Attempt to fetch title with HTTPS
-        response = requests.get(url, timeout=2)
+        response = requests.get(url, timeout=5)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         title = soup.title.string.strip() if soup.title else 'No title found'
@@ -180,35 +180,54 @@ def calculate_domain_similarity(parent, child):
     
 def fetch_domain_data(domains):
     domain_data = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_domain = {executor.submit(extract_website_content, domain): domain for domain in domains}
-        for future in concurrent.futures.as_completed(future_to_domain):
-            domain = future_to_domain[future]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
+        content_futures = {executor.submit(extract_website_content, domain): domain for domain in domains}
+        title_futures = {executor.submit(get_title, domain): domain for domain in domains}
+
+        for content_future in concurrent.futures.as_completed(content_futures):
+            domain = content_futures[content_future]
             try:
-                content = future.result()
-                title = get_title(domain)
-                domain_data[domain] = {'content': content, 'title': title}
+                content = content_future.result()
+                domain_data[domain] = {'content': content}
             except Exception as e:
-                print(f"Error fetching data for {domain}: {e}")
+                print(f"Error fetching content for {domain}: {e}")
+
+        for title_future in concurrent.futures.as_completed(title_futures):
+            domain = title_futures[title_future]
+            try:
+                title = title_future.result()
+                if domain in domain_data:
+                    domain_data[domain]['title'] = title
+                else:
+                    domain_data[domain] = {'title': title}
+            except Exception as e:
+                print(f"Error fetching title for {domain}: {e}")
+
     return domain_data
+
+import time
 
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv(r".\whitelist.csv")
+    parent_data = pd.read_csv(r"detect-phishing-domains-main\detect-phishing-domains-api\whitelist.csv")
     parent_domains = parent_data['domain'].values
 
     threshold_ratio = 0
     parent_child_dict = {}
-
+    start_scraping_time = time.time()
     # Fetch content and title for all domains
     all_domain_data = fetch_domain_data(child_domains + list(parent_domains))
+    end_scraping_time = time.time()
+    scraping_time = end_scraping_time - start_scraping_time
 
     # Separate child and parent domain data
     child_domain_data = {domain: all_domain_data[domain] for domain in child_domains}
     parent_domain_data = {domain: all_domain_data[domain] for domain in parent_domains}
+
+    start_comparison_time = time.time()
 
     i = 1
     for parent in parent_domains:
@@ -250,7 +269,11 @@ def detect_phishing():
         i += 1
         if matching_children:
             parent_child_dict[parent] = matching_children
-
+    
+    end_comparison_time = time.time()
+    comparison_time = end_comparison_time - start_comparison_time
+    print(f"Time taken for scraping: {scraping_time} seconds")
+    print(f"Time taken for comparisons: {comparison_time} seconds")
     return jsonify(parent_child_dict)
 
 if __name__ == "__main__":
