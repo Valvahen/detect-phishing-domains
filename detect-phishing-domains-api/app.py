@@ -11,6 +11,9 @@ import textdistance
 import nltk
 import concurrent.futures
 import ssl
+from collections import defaultdict
+import time
+import csv
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -62,7 +65,7 @@ def extract_website_content(url):
             # Find the main content of the webpage
             main_content = soup.find('main')  # You can adjust this according to the structure of the webpage
             
-            if main_content:
+            if (main_content):
                 content = main_content.get_text(separator='\n')
             else:
                 # Check if body tag exists
@@ -90,7 +93,7 @@ def clean_text(text):
 
 from langdetect import detect
 
-def calculate_similarity(paragraph1, paragraph2, n=2):
+def calculate_similarity(paragraph1, paragraph2):
     if paragraph1 == "No content found" or paragraph2 == "No content found":
         return -1
     try:
@@ -121,7 +124,6 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
         
         return similarity_percentage
     except Exception as e:
-        print(f"Error calculating similarity: {e}")
         return -1
 
 def get_title(url):
@@ -129,7 +131,6 @@ def get_title(url):
     if url in title_cache:
         return title_cache[url]
     try:
-        # Attempt to fetch title with HTTPS
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -141,7 +142,7 @@ def get_title(url):
         print(f"Error fetching title from {url}: {e}")
         return 'No title found'
 
-def compare_titles(title1, title2, n=2):
+def compare_titles(title1, title2):
     if title1 == 'No title found' or title2 == 'No title found':
         return -1
     try:
@@ -177,10 +178,10 @@ def calculate_domain_similarity(parent, child):
     except Exception as e:
         print(f"Error calculating domain similarity: {e}")
         return -1
-    
+
 def fetch_domain_data(domains):
     domain_data = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=200) as executor:
         content_futures = {executor.submit(extract_website_content, domain): domain for domain in domains}
         title_futures = {executor.submit(get_title, domain): domain for domain in domains}
 
@@ -205,19 +206,55 @@ def fetch_domain_data(domains):
 
     return domain_data
 
-import time
+def compare_domains(parent, child, parent_domain_data, child_domain_data, matching_children):
+    try:
+        parent_content = parent_domain_data[parent]['content']
+        parent_title = parent_domain_data[parent]['title']
+        child_content = child_domain_data[child]['content']
+        child_title = child_domain_data[child]['title']
+
+        domain_similarity = calculate_domain_similarity(parent, child)
+        content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
+        title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
+
+        print(f"Comparing {parent} and {child}:")
+
+        matching_children.append((child, {
+            'domain_similarity': domain_similarity,
+            'content_similarity': content_similarity,
+            'title_similarity': title_similarity,
+        }))
+    except Exception as e:
+        error_message = f"Error processing {parent} and {child}: {e}"
+        matching_children.append((child, {'error': error_message}))
+        print(error_message)
+
+def save_results_to_csv(results, filename='results.csv'):
+    # Convert the nested dictionary to a flat list of dictionaries
+    flat_results = []
+    for parent, children in results.items():
+        for child, similarities in children:
+            flat_result = {'parent_domain': parent, 'child_domain': child}
+            flat_result.update(similarities)
+            flat_results.append(flat_result)
+    
+    # Create a DataFrame and save it to a CSV file
+    df = pd.DataFrame(flat_results)
+    df.to_csv(filename, index=False)
+    print(f"Results saved to {filename}")
 
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv(r"detect-phishing-domains-main\detect-phishing-domains-api\whitelist.csv")
+    parent_data = pd.read_csv("detect-phishing-domains-main/detect-phishing-domains-api/whitelist.csv")
     parent_domains = parent_data['domain'].values
 
     threshold_ratio = 0
-    parent_child_dict = {}
+    parent_child_dict = defaultdict(list)
     start_scraping_time = time.time()
+    
     # Fetch content and title for all domains
     all_domain_data = fetch_domain_data(child_domains + list(parent_domains))
     end_scraping_time = time.time()
@@ -229,49 +266,23 @@ def detect_phishing():
 
     start_comparison_time = time.time()
 
-    i = 1
-    for parent in parent_domains:
-        matching_children = []
-        j = 1
-        for child in child_domains:
-            print(f"site {i} iteration {j}: {child}")
-            j += 1
-            ratio = fuzz.ratio(parent, child)
-            if ratio >= threshold_ratio:
-                try:
-                    # Get content and title for parent domain from pre-fetched data
-                    parent_content = parent_domain_data[parent]['content']
-                    parent_title = parent_domain_data[parent]['title']
-                    
-                    # Retrieve content and title for child domain from pre-fetched data
-                    child_content = child_domain_data[child]['content']
-                    child_title = child_domain_data[child]['title']
-                    
-                    # Calculate domain similarity
-                    domain_similarity = calculate_domain_similarity(parent, child)
-                    
-                    # Calculate text similarity
-                    content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
-                    
-                    # Compare titles
-                    title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
-
-                    matching_children.append((child, {
-                        'domain_similarity': domain_similarity,
-                        'content_similarity': content_similarity,
-                        'title_similarity': title_similarity,
-                    }))
-                except Exception as e:
-                    error_message = f"Error processing {parent} and {child}: {e}"
-                    matching_children.append((child, {'error': error_message}))
-                    print(error_message)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=200) as executor:
+        futures = []
+        for parent in parent_domains:
+            for child in child_domains:
+                ratio = fuzz.ratio(parent, child)
+                if ratio >= threshold_ratio:
+                    futures.append(executor.submit(compare_domains, parent, child, parent_domain_data, child_domain_data, parent_child_dict[parent]))
         
-        i += 1
-        if matching_children:
-            parent_child_dict[parent] = matching_children
-    
+        # Wait for all futures to complete
+        concurrent.futures.wait(futures)
+            
     end_comparison_time = time.time()
     comparison_time = end_comparison_time - start_comparison_time
+
+    # Save results to CSV file
+    save_results_to_csv(parent_child_dict)
+
     print(f"Time taken for scraping: {scraping_time} seconds")
     print(f"Time taken for comparisons: {comparison_time} seconds")
     return jsonify(parent_child_dict)
