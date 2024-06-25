@@ -11,6 +11,14 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
     const formData = new FormData();
     formData.append('file', file);
   
+    // Collect selected features
+    const featureCheckboxes = document.querySelectorAll('input[name="features"]:checked');
+    const selectedFeatures = [];
+    featureCheckboxes.forEach(checkbox => {
+        selectedFeatures.push(checkbox.value);
+    });
+    formData.append('features', JSON.stringify(selectedFeatures));
+  
     // Show loading bar
     const loading = document.getElementById('loading');
     loading.style.display = 'block';
@@ -48,9 +56,9 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
         errorMessage.textContent = `Error: ${error.message}`;
         loading.style.display = 'none'; // Hide loading bar
     });
-  });
+});
   
-  function displayResults(data) {
+function displayResults(data) {
     const resultsContainer = document.getElementById('results');
     resultsContainer.innerHTML = '';
 
@@ -59,16 +67,21 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
         parentElement.classList.add('result-item');
 
         const parentTitle = document.createElement('h3');
-        parentTitle.textContent = `Parent Domain: ${parent}`;
+        parentTitle.textContent = `Target Domain: ${parent}`;
         parentElement.appendChild(parentTitle);
 
         const childrenTable = document.createElement('table');
         childrenTable.classList.add('children-table');
-        childrenTable.classList.add('bordered'); // Add bordered class for styling
+        childrenTable.classList.add('bordered');
         
         // Create table header
         const headerRow = document.createElement('tr');
-        const headers = ['Child Domain', 'Domain Similarity (%)', 'Content Similarity (%)',  'Title Similarity (%)'];
+        const headers = ['Phishing Domain'];
+        const firstChild = data[parent][0];
+        if (firstChild[1].domain_similarity !== undefined) headers.push('Domain Similarity (%)');
+        if (firstChild[1].content_similarity !== undefined) headers.push('Content Similarity (%)');
+        if (firstChild[1].title_similarity !== undefined) headers.push('Title Similarity (%)');
+        if (firstChild[1].screenshot_similarity !== undefined) headers.push('Screenshot Similarity (%)');
         headers.forEach(headerText => {
             const headerCell = document.createElement('th');
             headerCell.textContent = headerText;
@@ -78,51 +91,43 @@ document.getElementById('upload-form').addEventListener('submit', function (e) {
 
         // Add data rows
         data[parent].forEach(child => {
-            const childRow = document.createElement('tr');
-            const childData = [
-                shortenURL(child[0]), // Shortened Child Domain
-                child[1].domain_similarity === -1 ? 'NA' : child[1].domain_similarity.toFixed(2), // Domain Similarity
-                child[1].content_similarity === -1 ? 'NA' : child[1].content_similarity.toFixed(2), // Content Similarity
-                child[1].title_similarity === -1 ? 'NA' : child[1].title_similarity.toFixed(2) // Title Similarity
-            ];
-
-            // Add background color based on thresholds
-            childRow.style.backgroundColor = getRowColor(child[1]);
-
-            childData.forEach(cellData => {
-                const cell = document.createElement('td');
-                cell.textContent = cellData;
-                childRow.appendChild(cell);
+            const childData = [shortenURL(child[0])];
+            if (child[1].domain_similarity !== undefined) childData.push(child[1].domain_similarity === -1 ? 'NA' : child[1].domain_similarity.toFixed(2));
+            if (child[1].content_similarity !== undefined) childData.push(child[1].content_similarity === -1 ? 'NA' : child[1].content_similarity.toFixed(2));
+            if (child[1].title_similarity !== undefined) childData.push(child[1].title_similarity === -1 ? 'NA' : child[1].title_similarity.toFixed(2));
+            if (child[1].screenshot_similarity !== undefined) childData.push(child[1].screenshot_similarity === -1 ? 'NA' : child[1].screenshot_similarity.toFixed(2));
+            
+            // Check if any similarity meets the threshold of 60%
+            const showRow = childData.slice(1).some(similarity => {
+                const similarityValue = parseFloat(similarity);
+                return similarityValue >= 0;
             });
-            childrenTable.appendChild(childRow);
-        });        
 
-        parentElement.appendChild(childrenTable);
-        resultsContainer.appendChild(parentElement);
+            if (showRow) {
+                const childRow = document.createElement('tr');
+                childData.forEach((cellData, index) => {
+                    const cell = document.createElement('td');
+                    cell.textContent = cellData;
+                    if (index !== 0) { // Exclude the first cell (Phishing Domain)
+                        const similarityValue = parseFloat(cellData);
+                        if (similarityValue >= 70 && similarityValue < 85) {
+                            cell.classList.add('pale-yellow');
+                        } else if (similarityValue >= 85) {
+                            cell.classList.add('pale-red');
+                        }
+                    }
+                    childRow.appendChild(cell);
+                });
+                childrenTable.appendChild(childRow);
+            }
+        });
+
+        if (childrenTable.rows.length > 1) { // Check if there are rows (excluding header)
+            parentElement.appendChild(childrenTable);
+            resultsContainer.appendChild(parentElement);
+        }
     }
 }
-
-function getRowColor(similarityData) {
-    // Define your threshold values here
-    const domainThreshold = 90;
-    const contentThreshold = 80;
-    const titleThreshold = 80;
-
-    // Determine which threshold to use based on available data
-    const domainSimilarity = similarityData.domain_similarity !== -1 ? similarityData.domain_similarity : 0;
-    const contentSimilarity = similarityData.content_similarity !== -1 ? similarityData.content_similarity : 0;
-    const titleSimilarity = similarityData.title_similarity !== -1 ? similarityData.title_similarity : 0;
-
-    // Determine the color based on the threshold
-    if (domainSimilarity >= domainThreshold || contentSimilarity >= contentThreshold || titleSimilarity >= titleThreshold) {
-        return 'red'; // or any color you prefer for a high similarity
-    } else if (domainSimilarity >= 50 || contentSimilarity >= 50 || titleSimilarity >= 50) {
-        return 'yellow'; // or any color you prefer for moderate similarity
-    } else {
-        return 'green'; // or any color you prefer for low similarity
-    }
-}
-
 
 function shortenURL(url) {
     const maxLength = 40; // Maximum length for the shortened URL
@@ -131,4 +136,3 @@ function shortenURL(url) {
     }
     return url.substr(0, maxLength - 3) + '...'; // Truncate URL and add ellipsis
 }
-
