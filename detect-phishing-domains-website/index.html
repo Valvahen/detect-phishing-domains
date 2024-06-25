@@ -1,24 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phishing Detector Test Interface</title>
-    <link rel="stylesheet" href="styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phishing Detector Test Interface</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Phishing Detector Test Interface</h1>
-        <form id="upload-form">
-            <label for="file-input">Upload a file containing child domains:</label>
-            <input type="file" id="file-input" accept=".txt">
-            <button type="submit">Submit</button>
-        </form>
-        <div id="loading" class="loading">Loading...</div>
-        <div id="results"></div>
-        <div id="error-message" class="error-message"></div>
-        <div id="time-taken"></div> <!-- New element for time taken -->
-    </div>
-    <script src="script.js"></script>
+    <div class="container">
+        <h1>Phishing Detector Test Interface</h1>
+        <form id="upload-form">
+            <label for="file-input">Upload a file containing child domains:</label>
+            <input type="file" id="file-input">
+            
+            <!-- Feature Selection -->
+            <div class="feature-selection">
+                <label>Select features:</label>
+                <div class="features-grid">
+                    <div class="feature-item">
+                        <input type="checkbox" id="domain" name="features" value="domain" checked>
+                        <label for="domain">Domain</label>
+                    </div>
+                    <div class="feature-item">
+                        <input type="checkbox" id="title" name="features" value="title" checked>
+                        <label for="title">Title</label>
+                    </div>
+                    <div class="feature-item">
+                        <input type="checkbox" id="content" name="features" value="content" checked>
+                        <label for="content">Content</label>
+                    </div>
+                    <div class="feature-item">
+                        <input type="checkbox" id="screenshot" name="features" value="screenshot">
+                        <label for="screenshot">Screenshot</label>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit">Submit</button>
+        </form>
+        <div id="loading" class="loading">Loading...</div>
+        <div id="results"></div>
+        <div id="error-message" class="error-message"></div>
+        <div id="time-taken"></div> <!-- New element for time taken -->
+    </div>
+    <script src="script.js"></script>
 </body>
 </html>
