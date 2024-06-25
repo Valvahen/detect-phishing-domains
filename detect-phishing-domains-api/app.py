@@ -11,15 +11,8 @@ import textdistance
 import nltk
 import concurrent.futures
 import ssl
-from collections import defaultdict
-import time
-import csv
-from selenium import webdriver
-from selenium.webdriver.firefox.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.firefox.options import Options
-from webdriver_manager.firefox import GeckoDriverManager
-import os
+import json
+import random
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -42,61 +35,49 @@ title_cache = {}
 # Function to ensure URLs start with http:// or https://
 def ensure_http(url):
     if not url.startswith(('http://', 'https://')):
+        # Try with https:// first
         https_url = 'https://' + url
         try:
             requests.get(https_url)
             return https_url
         except requests.RequestException:
+            # If https:// fails, try http://
             http_url = 'http://' + url
             try:
                 requests.get(http_url)
                 return http_url
             except requests.RequestException:
-                return url
+                # If both fail, return original url with http:// prefix
+                return http_url
     return url
-
-def extract_text_with_selenium(url):
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    
-    service = Service(r"C:\Users\Intern\Downloads\geckodriver-v0.34.0-win64\geckodriver.exe") 
-    
-    driver = webdriver.Firefox(service=service, options=options)
-    try:
-        driver.get(url)
-        time.sleep(5)  # Wait for JavaScript to render
-        text = driver.find_element(By.TAG_NAME, 'body').text
-    except Exception as e:
-        print(f"Error fetching content from {url}: {e}")
-        text = ''
-    finally:
-        driver.quit()
-    return text
 
 def extract_website_content(url):
     url = ensure_http(url)
     if url in content_cache:
         return content_cache[url]
     try:
+        # Attempt to fetch title with HTTPS
+        response = requests.head(url, verify=False)
+        if response.status_code != 200:
+            return 'No title found'
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             content = response.text
-            if "You need to enable JavaScript to run this app." in content:
-                print(f"JavaScript required for {url}, fetching content using Selenium...")
-                content = extract_text_with_selenium(url)
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Find the main content of the webpage
+            main_content = soup.find('main')  # You can adjust this according to the structure of the webpage
+            
+            if (main_content):
+                content = main_content.get_text(separator='\n')
             else:
-                soup = BeautifulSoup(content, 'html.parser')
-                main_content = soup.find('main')
-                if main_content:
-                    content = main_content.get_text(separator='\n')
+                # Check if body tag exists
+                if soup.body:
+                    content = soup.body.get_text(separator='\n')
                 else:
-                    if soup.body:
-                        content = soup.body.get_text(separator='\n')
-                    else:
-                        content = ''
+                    # If neither <main> nor <body> tag exists, return an empty string
+                    content = ''
+            # Clean up the extracted text
             content = clean_text(content)
             content_cache[url] = content
             print(f"Content fetched for {url}")
@@ -109,24 +90,44 @@ def extract_website_content(url):
         return "No content found"
 
 def clean_text(text):
+    # Remove extra spaces and newlines
     text = ' '.join(text.split())
     return text
 
 from langdetect import detect
 
-def calculate_similarity(paragraph1, paragraph2):
+def calculate_similarity(paragraph1, paragraph2, n=2):
     if paragraph1 == "No content found" or paragraph2 == "No content found":
         return -1
     try:
+        # Detect languages of the paragraphs
+        lang_paragraph1 = detect(paragraph1)
+        lang_paragraph2 = detect(paragraph2)
+        
+        # Check if languages are similar
+        if lang_paragraph1 != lang_paragraph2:
+            return -1
+
+        # Concatenate paragraphs
         combined_paragraphs = [paragraph1, paragraph2]
+        
+        # Compute TF-IDF scores
         tfidf_vectorizer = TfidfVectorizer(tokenizer=word_tokenize, lowercase=True, norm=None)
         tfidf_matrix = tfidf_vectorizer.fit_transform(combined_paragraphs)
+        
+        # Extract TF-IDF vectors for each paragraph
         tfidf_paragraph1 = tfidf_matrix[0]
         tfidf_paragraph2 = tfidf_matrix[1]
+        
+        # Calculate cosine similarity
         similarity = cosine_similarity(tfidf_paragraph1, tfidf_paragraph2)[0][0]
+        
+        # Normalize similarity score to percentage
         similarity_percentage = similarity * 100
+        
         return similarity_percentage
     except Exception as e:
+        print(f"Error calculating similarity: {e}")
         return -1
 
 def get_title(url):
@@ -134,6 +135,10 @@ def get_title(url):
     if url in title_cache:
         return title_cache[url]
     try:
+        # Attempt to fetch title with HTTPS
+        response = requests.head(url, verify=False)
+        if response.status_code != 200:
+            return 'No title found'
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -145,20 +150,28 @@ def get_title(url):
         print(f"Error fetching title from {url}: {e}")
         return 'No title found'
 
-def compare_titles(title1, title2):
+def compare_titles(title1, title2, n=2):
     if title1 == 'No title found' or title2 == 'No title found':
         return -1
     try:
+        # Calculate Damerau-Levenshtein distance between titles
         similarity_score = textdistance.damerau_levenshtein.normalized_similarity(title1.lower(), title2.lower())
+        
+        # Normalize the similarity score to a percentage
         similarity_percentage = similarity_score * 100
+        
         return similarity_percentage
     except Exception as e:
         print(f"Error comparing titles: {e}")
         return -1
 
+
+import textdistance
+import csv
+
 # Function to strip TLD from domain, including multi-part TLDs like ".co.in"
 def strip_tld(domain):
-    multi_part_tlds = ['.co.in', '.gov.in', 'org.in']
+    multi_part_tlds = ['.co.in', '.gov.in', '.org.in']
     for tld in multi_part_tlds:
         if domain.endswith(tld):
             return domain[:-len(tld)]
@@ -175,10 +188,10 @@ def remove_substrings(domain, substrings):
 
 # Load whitelist data from CSV
 whitelist_data = {}
-with open(r'detect-phishing-domains-main\detect-phishing-domains-api\whitelistSBI.csv', mode='r') as infile:
+with open('whitelist2.csv', mode='r') as infile:
     reader = csv.reader(infile)
     for rows in reader:
-        whitelist_data[rows[0]] = rows[1]
+        whitelist_data[rows[0]] = rows[1]  # Assuming rows[1] contains the corresponding 'org'
 
 def calculate_domain_similarity(parent, child):
     if not parent or not child:
@@ -188,12 +201,8 @@ def calculate_domain_similarity(parent, child):
         substrings_to_remove = [
             "xyz", "abc", "123", "online", "site", "shop", "store", "web", "info",
             "net", "my", "the", "best", "top", "pro", "plus", "go", "free", "biz",
-            "crt", "krt", 'india'
+            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www'
         ]
-
-        # Remove "www" prefix if present
-        parent = parent.lower().replace("www.", "")
-        child = child.lower().replace("www.", "")
 
         # Check if 'gov' exists in both parent and child domains before removing substrings or stripping TLD
         similarity_increase = 0
@@ -203,6 +212,14 @@ def calculate_domain_similarity(parent, child):
         # Remove specified substrings
         parent = remove_substrings(parent, substrings_to_remove)
         child = remove_substrings(child, substrings_to_remove)
+
+        # Get corresponding 'org' from whitelist data
+        parent_org = whitelist_data.get(parent, '')
+        child_org = whitelist_data.get(child, '')
+
+        # Check if parent_org exists in child or vice versa
+        if parent_org and (parent_org in child or child_org in parent):
+            similarity_increase += 25
 
         # Calculate Damerau-Levenshtein similarity with TLD
         levenshtein_similarity_with_TLD = textdistance.damerau_levenshtein.normalized_similarity(parent, child) * 100
@@ -231,134 +248,138 @@ def calculate_domain_similarity(parent, child):
             union_count = len(parent_without_tld_set.union(child_without_tld_set))
             jaccard_similarity_without_TLD = (intersection_count / union_count) * 100
 
-        # Check if 'org' exists in either domain names after stripping substrings
-        parent_org = whitelist_data.get(parent, '')
-
-        if parent_org and (parent_org in child or parent_org in parent):
-            similarity_increase += 25
-
         # Use a weighted average to combine the similarities
-        combined_similarity = (0.60 * levenshtein_similarity_without_TLD + 0.25 * jaccard_similarity_without_TLD + 0.10 * levenshtein_similarity_with_TLD + 0.05 * jaccard_similarity_with_TLD) + similarity_increase
+        combined_similarity = (0.60 * levenshtein_similarity_without_TLD + 0.30 * jaccard_similarity_without_TLD + 0.05 * levenshtein_similarity_with_TLD + 0.05 * jaccard_similarity_with_TLD) + similarity_increase
 
         return min(combined_similarity, 100)  # Ensure similarity does not exceed 100
     except Exception as e:
         print(f"Error calculating domain similarity: {e}")
         return -1
-
-def fetch_domain_data(domains):
+    
+def fetch_domain_data(domains, features):
     domain_data = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=200) as executor:
-        content_futures = {executor.submit(extract_website_content, domain): domain for domain in domains}
-        title_futures = {executor.submit(get_title, domain): domain for domain in domains}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
+        if 'content' in features:
+            content_futures = {executor.submit(extract_website_content, domain): domain for domain in domains}
+        if 'title' in features:
+            title_futures = {executor.submit(get_title, domain): domain for domain in domains}
 
-        for content_future in concurrent.futures.as_completed(content_futures):
-            domain = content_futures[content_future]
-            try:
-                content = content_future.result()
-                domain_data[domain] = {'content': content}
-            except Exception as e:
-                print(f"Error fetching content for {domain}: {e}")
+        if 'content' in features:
+            for content_future in concurrent.futures.as_completed(content_futures):
+                domain = content_futures[content_future]
+                try:
+                    content = content_future.result()
+                    if domain in domain_data:
+                        domain_data[domain]['content'] = content
+                    else:
+                        domain_data[domain] = {'content': content}
+                except Exception as e:
+                    print(f"Error fetching content for {domain}: {e}")
 
-        for title_future in concurrent.futures.as_completed(title_futures):
-            domain = title_futures[title_future]
-            try:
-                title = title_future.result()
-                if domain in domain_data:
-                    domain_data[domain]['title'] = title
-                else:
-                    domain_data[domain] = {'title': title}
-            except Exception as e:
-                print(f"Error fetching title for {domain}: {e}")
-                if domain not in domain_data:
-                    domain_data[domain] = {'title': 'No title found', 'content': 'No content found'}
+        if 'title' in features:
+            for title_future in concurrent.futures.as_completed(title_futures):
+                domain = title_futures[title_future]
+                try:
+                    title = title_future.result()
+                    if domain in domain_data:
+                        domain_data[domain]['title'] = title
+                    else:
+                        domain_data[domain] = {'title': title}
+                except Exception as e:
+                    print(f"Error fetching title for {domain}: {e}")
 
     return domain_data
 
-def compare_domains(parent, child, parent_domain_data, child_domain_data, matching_children):
+import time
+
+# Placeholder function for screenshot similarity
+def compare_screenshots(url1, url2):
+    if not url1 or not url2:
+        return -1
     try:
-        parent_content = parent_domain_data[parent].get('content', 'No content found')
-        parent_title = parent_domain_data[parent].get('title', 'No title found')
-        child_content = child_domain_data[child].get('content', 'No content found')
-        child_title = child_domain_data[child].get('title', 'No title found')
-
-        domain_similarity = calculate_domain_similarity(parent, child)
-        content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
-        title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
-
-        print(f"Comparing {parent} and {child}:")
-
-        matching_children.append((child, {
-            'domain_similarity': domain_similarity,
-            'content_similarity': content_similarity,
-            'title_similarity': title_similarity,
-        }))
+        # Simulate screenshot similarity with random value
+        similarity_percentage = random.uniform(0, 100)
+        return similarity_percentage
     except Exception as e:
-        error_message = f"Error processing {parent} and {child}: {e}"
-        matching_children.append((child, {'error': error_message}))
-        print(error_message)
+        print(f"Error comparing screenshots: {e}")
+        return -1
 
-def save_results_to_csv(results, results_folder='results', filename_base='results'):
-    # Ensure the results folder exists
-    if not os.path.exists(results_folder):
-        os.makedirs(results_folder)
-
-    # Find existing files to determine the next available filename
-    existing_files = [filename for filename in os.listdir(results_folder) if filename.startswith(filename_base)]
-    if existing_files:
-        last_file_number = max([int(filename.replace(filename_base, '').replace('.csv', '')) for filename in existing_files])
-        next_file_number = last_file_number + 1
-    else:
-        next_file_number = 1
-
-    filename = f"{filename_base}{next_file_number}.csv"
-    filepath = os.path.join(results_folder, filename)
-
-    flat_results = []
-    for parent, children in results.items():
-        for child, similarities in children:
-            flat_result = {'parent_domain': parent, 'child_domain': child}
-            flat_result.update(similarities)
-            flat_results.append(flat_result)
-    df = pd.DataFrame(flat_results)
-    df.to_csv(filepath, index=False)
-    print(f"Results saved to {filepath}")
 
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv("detect-phishing-domains-main/detect-phishing-domains-api/whitelistSBI.csv")
+    parent_data = pd.read_csv(r"whitelist2.csv")
     parent_domains = parent_data['domain'].values
 
-    threshold_ratio = 0
-    parent_child_dict = defaultdict(list)
-    start_scraping_time = time.time()
+    selected_features = json.loads(request.form['features'])
     
-    all_domain_data = fetch_domain_data(child_domains + list(parent_domains))
+    threshold_ratio = 0
+    parent_child_dict = {}
+    start_scraping_time = time.time()
+    # Fetch content and title for all domains
+    all_domain_data = fetch_domain_data(child_domains + list(parent_domains), selected_features)
     end_scraping_time = time.time()
     scraping_time = end_scraping_time - start_scraping_time
 
-    child_domain_data = {domain: all_domain_data[domain] for domain in child_domains}
-    parent_domain_data = {domain: all_domain_data[domain] for domain in parent_domains}
+    # Separate child and parent domain data
+    child_domain_data = {domain: all_domain_data.get(domain, {}) for domain in child_domains}
+    parent_domain_data = {domain: all_domain_data.get(domain, {}) for domain in parent_domains}
 
     start_comparison_time = time.time()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=200) as executor:
-        futures = []
-        for parent in parent_domains:
-            for child in child_domains:
-                ratio = fuzz.ratio(parent, child)
-                if ratio >= threshold_ratio:
-                    futures.append(executor.submit(compare_domains, parent, child, parent_domain_data, child_domain_data, parent_child_dict[parent]))
+    i = 1
+    for parent in parent_domains:
+        matching_children = []
+        j = 1
+        for child in child_domains:
+            print(f"site {i} iteration {j}: {child}")
+            j += 1
+            ratio = fuzz.ratio(parent, child)
+            if ratio >= threshold_ratio:
+                try:
+                    result = {}
+                    if 'domain' in selected_features:
+                        # Calculate domain similarity
+                        domain_similarity = calculate_domain_similarity(parent, child)
+                        result['domain_similarity'] = domain_similarity
+                    
+                    if 'content' in selected_features:
+                        # Get content for parent and child domains from pre-fetched data
+                        parent_content = parent_domain_data[parent].get('content', '')
+                        child_content = child_domain_data[child].get('content', '')
+                        
+                        # Calculate text similarity
+                        content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
+                        result['content_similarity'] = content_similarity
+                    
+                    if 'title' in selected_features:
+                        # Get titles for parent and child domains from pre-fetched data
+                        parent_title = parent_domain_data[parent].get('title', '')
+                        child_title = child_domain_data[child].get('title', '')
+                        
+                        # Compare titles
+                        title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
+                        result['title_similarity'] = title_similarity
+
+                    if 'screenshot' in selected_features:
+                        # Compare screenshots using placeholder function
+                        screenshot_similarity = compare_screenshots(parent, child)
+                        result['screenshot_similarity'] = screenshot_similarity
+
+                    matching_children.append((child, result))
+                except Exception as e:
+                    error_message = f"Error processing {parent} and {child}: {e}"
+                    matching_children.append((child, {'error': error_message}))
+                    print(error_message)
         
-        concurrent.futures.wait(futures)
-            
+        i += 1
+        if matching_children:
+            parent_child_dict[parent] = matching_children
+    
     end_comparison_time = time.time()
     comparison_time = end_comparison_time - start_comparison_time
-
-    save_results_to_csv(parent_child_dict)
-
     print(f"Time taken for scraping: {scraping_time} seconds")
     print(f"Time taken for comparisons: {comparison_time} seconds")
     return jsonify(parent_child_dict)
