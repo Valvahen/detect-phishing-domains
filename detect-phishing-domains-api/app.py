@@ -13,6 +13,7 @@ import concurrent.futures
 import ssl
 import json
 import random
+import os
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -59,7 +60,7 @@ def extract_website_content(url):
         # Attempt to fetch title with HTTPS
         response = requests.head(url, verify=False)
         if response.status_code != 200:
-            return 'No title found'
+            return 'No content found'
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             content = response.text
@@ -171,12 +172,12 @@ import csv
 
 # Function to strip TLD from domain, including multi-part TLDs like ".co.in"
 def strip_tld(domain):
-    multi_part_tlds = ['.co.in', '.gov.in', '.org.in']
+    multi_part_tlds = ['.co.in', '.org.in', '..in', '.in']
     for tld in multi_part_tlds:
         if domain.endswith(tld):
             return domain[:-len(tld)]
     parts = domain.split('.')
-    if len(parts) > 1:
+    if len(parts) > 2:
         return '.'.join(parts[:-1])
     return domain
 
@@ -186,75 +187,58 @@ def remove_substrings(domain, substrings):
         domain = domain.replace(substring, "")
     return domain
 
-# Load whitelist data from CSV
-whitelist_data = {}
-with open('whitelist2.csv', mode='r') as infile:
-    reader = csv.reader(infile)
-    for rows in reader:
-        whitelist_data[rows[0]] = rows[1]  # Assuming rows[1] contains the corresponding 'org'
+
 
 def calculate_domain_similarity(parent, child):
     if not parent or not child:
         return -1
     try:
+
         # Define substrings to be removed
         substrings_to_remove = [
             "xyz", "abc", "123", "online", "site", "shop", "store", "web", "info",
-            "net", "my", "the", "best", "top", "pro", "plus", "go", "free", "biz",
-            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www'
+            "net", "my", "the", "best", "top", "pro", "plus", "gov", "free", "biz",
+            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.'
         ]
 
-        # Check if 'gov' exists in both parent and child domains before removing substrings or stripping TLD
-        similarity_increase = 0
-        if "gov" in parent and "gov" in child:
-            similarity_increase += 5
-
         # Remove specified substrings
-        parent = remove_substrings(parent, substrings_to_remove)
-        child = remove_substrings(child, substrings_to_remove)
-
-        # Get corresponding 'org' from whitelist data
-        parent_org = whitelist_data.get(parent, '')
-        child_org = whitelist_data.get(child, '')
-
-        # Check if parent_org exists in child or vice versa
-        if parent_org and (parent_org in child or child_org in parent):
-            similarity_increase += 25
+        parent_cleaned = remove_substrings(parent, substrings_to_remove)
+        child_cleaned = remove_substrings(child, substrings_to_remove)
 
         # Calculate Damerau-Levenshtein similarity with TLD
-        levenshtein_similarity_with_TLD = textdistance.damerau_levenshtein.normalized_similarity(parent, child) * 100
+        levenshtein_similarity_with_TLD = textdistance.damerau_levenshtein.normalized_similarity(parent_cleaned, child_cleaned) * 100
 
         # Calculate Damerau-Levenshtein similarity without TLD
-        parent_stripped = strip_tld(parent)
-        child_stripped = strip_tld(child)
+        parent_stripped = strip_tld(parent_cleaned)
+        child_stripped = strip_tld(child_cleaned)
         levenshtein_similarity_without_TLD = textdistance.damerau_levenshtein.normalized_similarity(parent_stripped, child_stripped) * 100
 
         # Calculate additional similarity metrics only if the stripped Levenshtein similarity is below a threshold
         jaccard_similarity_with_TLD = 0
-        if levenshtein_similarity_with_TLD < 100:
             # Calculate positional Jaccard similarity with TLD
-            parent_set = set(parent)
-            child_set = set(child)
-            intersection_count = len(parent_set.intersection(child_set))
-            union_count = len(parent_set.union(child_set))
-            jaccard_similarity_with_TLD = (intersection_count / union_count) * 100
+        parent_set = set(parent_cleaned)
+        child_set = set(child_cleaned)
+        intersection_count = len(parent_set.intersection(child_set))
+        union_count = len(parent_set.union(child_set))
+        jaccard_similarity_with_TLD = (intersection_count / union_count) * 100
 
         jaccard_similarity_without_TLD = 0
-        if levenshtein_similarity_with_TLD < 100:
-            # Calculate positional Jaccard similarity without TLD
-            parent_without_tld_set = set(parent_stripped)
-            child_without_tld_set = set(child_stripped)
-            intersection_count = len(parent_without_tld_set.intersection(child_without_tld_set))
-            union_count = len(parent_without_tld_set.union(child_without_tld_set))
-            jaccard_similarity_without_TLD = (intersection_count / union_count) * 100
+
+        # Calculate positional Jaccard similarity without TLD
+        parent_without_tld_set = set(parent_stripped)
+        child_without_tld_set = set(child_stripped)
+        intersection_count = len(parent_without_tld_set.intersection(child_without_tld_set))
+        union_count = len(parent_without_tld_set.union(child_without_tld_set))
+        jaccard_similarity_without_TLD = (intersection_count / union_count) * 100
 
         # Use a weighted average to combine the similarities
-        combined_similarity = (0.60 * levenshtein_similarity_without_TLD + 0.30 * jaccard_similarity_without_TLD + 0.05 * levenshtein_similarity_with_TLD + 0.05 * jaccard_similarity_with_TLD) + similarity_increase
+        combined_similarity = (0.35 * levenshtein_similarity_without_TLD + 0.30 * jaccard_similarity_without_TLD + 0.05 * levenshtein_similarity_with_TLD + 0.30 * jaccard_similarity_with_TLD)
 
         return min(combined_similarity, 100)  # Ensure similarity does not exceed 100
     except Exception as e:
         print(f"Error calculating domain similarity: {e}")
         return -1
+
     
 def fetch_domain_data(domains, features):
     domain_data = {}
@@ -303,6 +287,33 @@ def compare_screenshots(url1, url2):
     except Exception as e:
         print(f"Error comparing screenshots: {e}")
         return -1
+    
+
+def save_results_to_csv(results, results_folder='results', filename_base='results'):
+    if not os.path.exists(results_folder):
+        os.makedirs(results_folder)
+
+    flat_results = []
+    for parent, children in results.items():
+        for child, child_info in children:
+            flat_result = {'parent_domain': parent, 'child_domain': child}
+            flat_result.update(child_info)
+            flat_results.append(flat_result)
+
+    if flat_results:  # Check if there are results to save
+        base_filepath = os.path.join(results_folder, filename_base)
+        filepath = base_filepath + ".csv"
+        file_index = 1
+
+        while os.path.exists(filepath):
+            filepath = f"{base_filepath}{file_index}.csv"
+            file_index += 1
+
+        df = pd.DataFrame(flat_results)
+        df.to_csv(filepath, index=False)
+        print(f"Results saved to {filepath}")
+    else:
+        print("No results to save.")
 
 
 @app.route('/', methods=['POST'])
@@ -310,7 +321,7 @@ def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv(r"whitelist2.csv")
+    parent_data = pd.read_csv(r"detect-phishing-domains-api\whitelist.csv")
     parent_domains = parent_data['domain'].values
 
     selected_features = json.loads(request.form['features'])
@@ -380,6 +391,9 @@ def detect_phishing():
     
     end_comparison_time = time.time()
     comparison_time = end_comparison_time - start_comparison_time
+
+    save_results_to_csv(parent_child_dict)
+
     print(f"Time taken for scraping: {scraping_time} seconds")
     print(f"Time taken for comparisons: {comparison_time} seconds")
     return jsonify(parent_child_dict)
