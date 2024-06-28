@@ -14,6 +14,13 @@ import ssl
 import json
 import random
 import os
+from queue import Queue
+import threading
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException
+import time
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -26,12 +33,16 @@ nltk.download('punkt')
 session = requests.Session()
 session.verify = False
 
+# Flask setup
 app = Flask(__name__)
 CORS(app)
 
 # Define dictionaries to store cached data
 content_cache = {}
 title_cache = {}
+
+# Semaphore to limit Selenium driver instances
+driver_semaphore = threading.Semaphore(1)
 
 # Function to ensure URLs start with http:// or https://
 def ensure_http(url):
@@ -52,16 +63,24 @@ def ensure_http(url):
                 return http_url
     return url
 
+# Queue to manage URLs for Selenium content extraction
+url_queue = Queue()
+
 def extract_website_content(url):
+    dom=url
     url = ensure_http(url)
-    if url in content_cache:
-        return content_cache[url]
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
+
     try:
-        # Attempt to fetch title with HTTPS
-        response = requests.head(url, verify=False)
+        # Try with HEAD request first
+        response = requests.head(url, headers=headers, verify=True, timeout=10)
         if response.status_code != 200:
-            return 'No content found'
-        response = requests.get(url, timeout=5)
+            # If HEAD request fails, try GET request directly
+            response = requests.get(url, headers=headers, timeout=10, verify=True)
+        else:
+            # If HEAD request is successful, follow up with GET request
+            response = requests.get(url, headers=headers, timeout=10, verify=True)
+        
         if response.status_code == 200:
             content = response.text
             soup = BeautifulSoup(content, 'html.parser')
@@ -69,7 +88,7 @@ def extract_website_content(url):
             # Find the main content of the webpage
             main_content = soup.find('main')  # You can adjust this according to the structure of the webpage
             
-            if (main_content):
+            if main_content:
                 content = main_content.get_text(separator='\n')
             else:
                 # Check if body tag exists
@@ -78,16 +97,68 @@ def extract_website_content(url):
                 else:
                     # If neither <main> nor <body> tag exists, return an empty string
                     content = ''
-            # Clean up the extracted text
-            content = clean_text(content)
-            content_cache[url] = content
-            print(f"Content fetched for {url}")
-            return content
+
+            # Check if the content suggests JavaScript is needed
+            if "You need to enable JavaScript to run this app." in content.strip():
+                print(f"Enqueueing {dom} for Selenium processing")
+                url_queue.put(dom)  # Enqueue URL for Selenium processing
+                return "No content found"  # Return placeholder since content will be fetched by Selenium
+            else:    
+                print(f"Content fetched for {url}")
+                return content.strip()  # Clean up whitespace and return content
+
         else:
             print(f"Failed to fetch content from {url}. Status code: {response.status_code}")
             return "No content found"
+    
     except requests.RequestException as e:
         print(f"Error fetching content from {url}: {e}")
+        return "No content found"
+
+def extract_website_content_using_selenium(url):
+    url = ensure_http(url)
+    
+    # Set up Selenium with headless Chrome
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    # Path to the ChromeDriver
+    driver_path = r"chromedriver-win64/chromedriver.exe"
+    service = Service(driver_path)
+    
+    try:
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.get(url)
+        
+        # Wait for JavaScript to load the content (adjust as needed)
+        time.sleep(5)
+        
+        content = driver.page_source
+        driver.quit()
+        
+        soup = BeautifulSoup(content, 'html.parser')
+        
+        # Find the main content of the webpage
+        main_content = soup.find('main')  # Adjust this according to the structure of the webpage
+        
+        if main_content:
+            content = main_content.get_text(separator='\n')
+        else:
+            # Check if body tag exists
+            if soup.body:
+                content = soup.body.get_text(separator='\n')
+            else:
+                # If neither <main> nor <body> tag exists, return an empty string
+                content = ''
+
+        print(f"Content fetched for {url}")     
+        return content
+    
+    except WebDriverException as e:
+        print(f"Error fetching content from {url} using Selenium: {e}")
         return "No content found"
 
 def clean_text(text):
@@ -133,21 +204,22 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
 
 def get_title(url):
     url = ensure_http(url)
-    if url in title_cache:
-        return title_cache[url]
     try:
-        # Attempt to fetch title with HTTPS
-        response = requests.head(url, verify=False)
-        if response.status_code != 200:
-            return 'No title found'
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
+        # Make a GET request to the URL with allow_redirects=True to follow redirects
+        response = requests.get(url, verify=False, allow_redirects=True, timeout=5)
+        response.raise_for_status()  # Raise an exception for 4xx/5xx status codes
+        
+        # Get the final URL after following redirects
+        final_url = response.url
+        
+        # Use BeautifulSoup to parse the content and find the title
         soup = BeautifulSoup(response.content, 'html.parser')
         title = soup.title.string.strip() if soup.title else 'No title found'
-        title_cache[url] = title
-        print(f"title fetched for {url}")
+        
+        print(f"Title fetched for {url}: {title}")
         return title
-    except Exception as e:
+    
+    except requests.RequestException as e:
         print(f"Error fetching title from {url}: {e}")
         return 'No title found'
 
@@ -166,10 +238,6 @@ def compare_titles(title1, title2, n=2):
         print(f"Error comparing titles: {e}")
         return -1
 
-
-import textdistance
-import csv
-
 # Function to strip TLD from domain, including multi-part TLDs like ".co.in"
 def strip_tld(domain):
     multi_part_tlds = ['.co.in', '.org.in', '..in', '.in']
@@ -187,18 +255,15 @@ def remove_substrings(domain, substrings):
         domain = domain.replace(substring, "")
     return domain
 
-
-
 def calculate_domain_similarity(parent, child):
     if not parent or not child:
         return -1
     try:
-
         # Define substrings to be removed
         substrings_to_remove = [
             "xyz", "abc", "123", "online", "site", "shop", "store", "web", "info",
             "net", "my", "the", "best", "top", "pro", "plus", "gov", "free", "biz",
-            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.'
+            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.','credit'
         ]
 
         # Remove specified substrings
@@ -215,7 +280,7 @@ def calculate_domain_similarity(parent, child):
 
         # Calculate additional similarity metrics only if the stripped Levenshtein similarity is below a threshold
         jaccard_similarity_with_TLD = 0
-            # Calculate positional Jaccard similarity with TLD
+        # Calculate positional Jaccard similarity with TLD
         parent_set = set(parent_cleaned)
         child_set = set(child_cleaned)
         intersection_count = len(parent_set.intersection(child_set))
@@ -239,7 +304,6 @@ def calculate_domain_similarity(parent, child):
         print(f"Error calculating domain similarity: {e}")
         return -1
 
-    
 def fetch_domain_data(domains, features):
     domain_data = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
@@ -272,9 +336,17 @@ def fetch_domain_data(domains, features):
                 except Exception as e:
                     print(f"Error fetching title for {domain}: {e}")
 
-    return domain_data
+    # Process URLs in the queue that require Selenium for content extraction
+    while not url_queue.empty():
+        domain = url_queue.get()
+        content = extract_website_content_using_selenium(domain)
+        if domain in domain_data:
+            domain_data[domain]['content'] = content
+        else:
+            domain_data[domain] = {'content': content}
+        url_queue.task_done()
 
-import time
+    return domain_data
 
 # Placeholder function for screenshot similarity
 def compare_screenshots(url1, url2):
@@ -287,7 +359,6 @@ def compare_screenshots(url1, url2):
     except Exception as e:
         print(f"Error comparing screenshots: {e}")
         return -1
-    
 
 def save_results_to_csv(results, results_folder='results', filename_base='results'):
     if not os.path.exists(results_folder):
@@ -315,28 +386,27 @@ def save_results_to_csv(results, results_folder='results', filename_base='result
     else:
         print("No results to save.")
 
-
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv(r"detect-phishing-domains-api\whitelist.csv")
+    parent_data = pd.read_csv(r"whitelist.csv")
     parent_domains = parent_data['domain'].values
 
     selected_features = json.loads(request.form['features'])
     
     threshold_ratio = 0
     parent_child_dict = {}
+    
     start_scraping_time = time.time()
-    # Fetch content and title for all domains
-    all_domain_data = fetch_domain_data(child_domains + list(parent_domains), selected_features)
+    domain_data = fetch_domain_data(child_domains + list(parent_domains), selected_features)
     end_scraping_time = time.time()
     scraping_time = end_scraping_time - start_scraping_time
 
     # Separate child and parent domain data
-    child_domain_data = {domain: all_domain_data.get(domain, {}) for domain in child_domains}
-    parent_domain_data = {domain: all_domain_data.get(domain, {}) for domain in parent_domains}
+    child_domain_data = {domain: domain_data.get(domain, {}) for domain in child_domains}
+    parent_domain_data = {domain: domain_data.get(domain, {}) for domain in parent_domains}
 
     start_comparison_time = time.time()
 
