@@ -9,6 +9,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from nltk.tokenize import word_tokenize
 import textdistance
 import nltk
+from nltk.corpus import stopwords
 import concurrent.futures
 import ssl
 import json
@@ -27,6 +28,7 @@ requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # Download NLTK tokenizer data
+nltk.download('stopwords')
 nltk.download('punkt')
 
 # Disable SSL certificate verification
@@ -69,6 +71,12 @@ url_queue = Queue()
 def extract_website_content(url):
     dom=url
     url = ensure_http(url)
+    # Check cache first
+    if url in content_cache:
+        print(f"Content for {url} already in cache")
+        return content_cache[url]
+    
+    
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
 
     try:
@@ -103,7 +111,9 @@ def extract_website_content(url):
                 print(f"Enqueueing {dom} for Selenium processing")
                 url_queue.put(dom)  # Enqueue URL for Selenium processing
                 return "No content found"  # Return placeholder since content will be fetched by Selenium
-            else:    
+            else:
+                # Cache the content
+                content_cache[url] = content
                 print(f"Content fetched for {url}")
                 return content.strip()  # Clean up whitespace and return content
 
@@ -168,6 +178,12 @@ def clean_text(text):
 
 from langdetect import detect
 
+def remove_stop_words(paragraph, lang='english'):
+    stop_words = set(stopwords.words(lang))
+    words = word_tokenize(paragraph)
+    filtered_words = [word for word in words if word.lower() not in stop_words]
+    return ' '.join(filtered_words)
+
 def calculate_similarity(paragraph1, paragraph2, n=2):
     if paragraph1 == "No content found" or paragraph2 == "No content found":
         return -1
@@ -179,9 +195,13 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
         # Check if languages are similar
         if lang_paragraph1 != lang_paragraph2:
             return -1
-
+        
+        # Remove stop words from the paragraphs
+        paragraph1_filtered = remove_stop_words(paragraph1, lang=lang_paragraph1)
+        paragraph2_filtered = remove_stop_words(paragraph2, lang=lang_paragraph2)
+        
         # Concatenate paragraphs
-        combined_paragraphs = [paragraph1, paragraph2]
+        combined_paragraphs = [paragraph1_filtered, paragraph2_filtered]
         
         # Compute TF-IDF scores
         tfidf_vectorizer = TfidfVectorizer(tokenizer=word_tokenize, lowercase=True, norm=None)
@@ -204,6 +224,12 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
 
 def get_title(url):
     url = ensure_http(url)
+    # Check cache first
+    if url in title_cache:
+        print(f"Title for {url} already in cache")
+        return title_cache[url]
+    
+    
     try:
         # Make a GET request to the URL with allow_redirects=True to follow redirects
         response = requests.get(url, verify=False, allow_redirects=True, timeout=5)
@@ -216,7 +242,9 @@ def get_title(url):
         soup = BeautifulSoup(response.content, 'html.parser')
         title = soup.title.string.strip() if soup.title else 'No title found'
         
-        print(f"Title fetched for {url}: {title}")
+        # Cache the title
+        title_cache[url] = title
+        print(f"Title fetched for {url}")
         return title
     
     except requests.RequestException as e:
@@ -317,7 +345,7 @@ def fetch_domain_data(domains, features):
                 domain = content_futures[content_future]
                 try:
                     content = content_future.result()
-                    if domain in domain_data:
+                    if domain in domain_data:   
                         domain_data[domain]['content'] = content
                     else:
                         domain_data[domain] = {'content': content}
@@ -360,66 +388,93 @@ def compare_screenshots(url1, url2):
         print(f"Error comparing screenshots: {e}")
         return -1
 
-def save_results_to_csv(results, results_folder='results', filename_base='results'):
-    if not os.path.exists(results_folder):
-        os.makedirs(results_folder)
+# def save_results_to_csv(results, results_folder='results', filename_base='results'):
+#     if not os.path.exists(results_folder):
+#         os.makedirs(results_folder)
 
+#     flat_results = []
+#     for parent, children in results.items():
+#         for child, child_info in children:
+#             flat_result = {'parent_domain': parent, 'child_domain': child}
+#             flat_result.update(child_info)
+#             flat_results.append(flat_result)
+
+#     if flat_results:  # Check if there are results to save
+#         base_filepath = os.path.join(results_folder, filename_base)
+#         filepath = base_filepath + ".csv"
+#         file_index = 1
+
+#         while os.path.exists(filepath):
+#             filepath = f"{base_filepath}{file_index}.csv"
+#             file_index += 1
+
+#         df = pd.DataFrame(flat_results)
+#         df.to_csv(filepath, index=False)
+#         print(f"Results saved to {filepath}")
+#     else:
+#         print("No results to save.")
+
+import os
+import pandas as pd
+
+def save_results_to_csv(results, results_file='results6.csv', batch_index=None):
+    if not os.path.exists(results_file):
+        mode = 'w'  # Create a new file if it doesn't exist
+    else:
+        mode = 'a'  # Append to existing file
+    
     flat_results = []
     for parent, children in results.items():
         for child, child_info in children:
             flat_result = {'parent_domain': parent, 'child_domain': child}
             flat_result.update(child_info)
+            if batch_index is not None:
+                flat_result['batch_index'] = batch_index  # Add batch index if provided
             flat_results.append(flat_result)
 
     if flat_results:  # Check if there are results to save
-        base_filepath = os.path.join(results_folder, filename_base)
-        filepath = base_filepath + ".csv"
-        file_index = 1
-
-        while os.path.exists(filepath):
-            filepath = f"{base_filepath}{file_index}.csv"
-            file_index += 1
-
         df = pd.DataFrame(flat_results)
-        df.to_csv(filepath, index=False)
-        print(f"Results saved to {filepath}")
+        df.to_csv(results_file, mode=mode, index=False, header=not os.path.exists(results_file))
+        print(f"Results saved to {results_file}")
     else:
         print("No results to save.")
 
-@app.route('/', methods=['POST'])
-def detect_phishing():
-    file = request.files['file']
-    child_domains = file.read().decode('utf-8').splitlines()
-    
-    parent_data = pd.read_csv(r"whitelist.csv")
-    parent_domains = parent_data['domain'].values
+import math
+import pandas as pd
+import os
+from datetime import datetime
 
-    selected_features = json.loads(request.form['features'])
-    
-    threshold_ratio = 0
-    parent_child_dict = {}
-    
-    start_scraping_time = time.time()
-    domain_data = fetch_domain_data(child_domains + list(parent_domains), selected_features)
-    end_scraping_time = time.time()
-    scraping_time = end_scraping_time - start_scraping_time
+# Global set to track already processed (parent, child) combinations
+processed_child_domains = set()
 
-    # Separate child and parent domain data
-    child_domain_data = {domain: domain_data.get(domain, {}) for domain in child_domains}
-    parent_domain_data = {domain: domain_data.get(domain, {}) for domain in parent_domains}
+def process_child_domains_in_batches(child_domains, parent_domains, selected_features, results_file='results6.csv'):
+    batch_size = 1000
+    num_batches = math.ceil(len(child_domains) / batch_size)
 
-    start_comparison_time = time.time()
-
-    i = 1
-    for parent in parent_domains:
-        matching_children = []
-        j = 1
-        for child in child_domains:
-            print(f"site {i} iteration {j}: {child}")
-            j += 1
-            ratio = fuzz.ratio(parent, child)
-            if ratio >= threshold_ratio:
+    for batch_index in range(num_batches):
+        start_index = batch_index * batch_size
+        end_index = min((batch_index + 1) * batch_size, len(child_domains))
+        batch_child_domains = child_domains[start_index:end_index]
+        
+        results = {}  # Reset results for each batch
+        
+        # Fetch domain data for this batch
+        domain_data = fetch_domain_data(batch_child_domains + list(parent_domains), selected_features)
+        
+        # Separate child and parent domain data
+        child_domain_data = {domain: domain_data.get(domain, {}) for domain in batch_child_domains}
+        i=1
+        for parent in parent_domains:
+            matching_children = []
+            j=1
+            for child in batch_child_domains:
                 try:
+                    print(f"site {i}: iteration {j}")
+                    j+=1
+                    # Check if (parent, child) combination has already been processed
+                    if (parent, child) in processed_child_domains:
+                        continue  # Skip this parent-child combination if already processed
+
                     result = {}
                     if 'domain' in selected_features:
                         # Calculate domain similarity
@@ -428,8 +483,8 @@ def detect_phishing():
                     
                     if 'content' in selected_features:
                         # Get content for parent and child domains from pre-fetched data
-                        parent_content = parent_domain_data[parent].get('content', '')
-                        child_content = child_domain_data[child].get('content', '')
+                        parent_content = domain_data.get(parent, {}).get('content', '')
+                        child_content = child_domain_data.get(child, {}).get('content', '')
                         
                         # Calculate text similarity
                         content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
@@ -437,8 +492,8 @@ def detect_phishing():
                     
                     if 'title' in selected_features:
                         # Get titles for parent and child domains from pre-fetched data
-                        parent_title = parent_domain_data[parent].get('title', '')
-                        child_title = child_domain_data[child].get('title', '')
+                        parent_title = domain_data.get(parent, {}).get('title', '')
+                        child_title = child_domain_data.get(child, {}).get('title', '')
                         
                         # Compare titles
                         title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
@@ -449,24 +504,46 @@ def detect_phishing():
                         screenshot_similarity = compare_screenshots(parent, child)
                         result['screenshot_similarity'] = screenshot_similarity
 
-                    matching_children.append((child, result))
+                    matching_children.append((child, result))    
+                    
+                    # Mark (parent, child) combination as processed
+                    processed_child_domains.add((parent, child))
+                    
                 except Exception as e:
                     error_message = f"Error processing {parent} and {child}: {e}"
                     matching_children.append((child, {'error': error_message}))
                     print(error_message)
+                    
+            i+=1
+            if matching_children:
+                results[parent] = matching_children
         
-        i += 1
-        if matching_children:
-            parent_child_dict[parent] = matching_children
+        # Save results of the current batch to CSV file
+        save_results_to_csv(results, results_file, batch_index=batch_index)
     
-    end_comparison_time = time.time()
-    comparison_time = end_comparison_time - start_comparison_time
+    return results
 
-    save_results_to_csv(parent_child_dict)
+@app.route('/', methods=['POST'])
+def detect_phishing():
+    file = request.files['file']
+    child_domains = file.read().decode('utf-8').splitlines()
+    
+    parent_data = pd.read_csv(r"detect-phishing-domains-api\whitelist.csv")
+    parent_domains = parent_data['domain'].values
+
+    selected_features = json.loads(request.form['features'])
+    
+    threshold_ratio = 0
+    
+    start_scraping_time = time.time()
+    parent_child_dict = process_child_domains_in_batches(child_domains, parent_domains, selected_features)
+    end_scraping_time = time.time()
+    scraping_time = end_scraping_time - start_scraping_time
 
     print(f"Time taken for scraping: {scraping_time} seconds")
-    print(f"Time taken for comparisons: {comparison_time} seconds")
     return jsonify(parent_child_dict)
+
 
 if __name__ == "__main__":
     app.run()
+    
