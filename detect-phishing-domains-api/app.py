@@ -27,7 +27,6 @@ import time
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 ssl._create_default_https_context = ssl._create_unverified_context
 
-# Download NLTK tokenizer data
 nltk.download('stopwords')
 nltk.download('punkt')
 
@@ -178,8 +177,11 @@ def clean_text(text):
 
 from langdetect import detect
 
-def remove_stop_words(paragraph, lang='english'):
-    stop_words = set(stopwords.words(lang))
+def remove_stop_words(paragraph, lang):
+    try:
+        stop_words = set(stopwords.words(lang))
+    except Exception:
+        stop_words = set(stopwords.words('english'))  # Default to English stopwords if specific language stopwords are not available
     words = word_tokenize(paragraph)
     filtered_words = [word for word in words if word.lower() not in stop_words]
     return ' '.join(filtered_words)
@@ -254,6 +256,8 @@ def get_title(url):
 def compare_titles(title1, title2, n=2):
     if title1 == 'No title found' or title2 == 'No title found':
         return -1
+    if title1 == 'Home' and title2 == 'Home':
+        return 0
     try:
         # Calculate Damerau-Levenshtein distance between titles
         similarity_score = textdistance.damerau_levenshtein.normalized_similarity(title1.lower(), title2.lower())
@@ -388,41 +392,21 @@ def compare_screenshots(url1, url2):
         print(f"Error comparing screenshots: {e}")
         return -1
 
-# def save_results_to_csv(results, results_folder='results', filename_base='results'):
-#     if not os.path.exists(results_folder):
-#         os.makedirs(results_folder)
-
-#     flat_results = []
-#     for parent, children in results.items():
-#         for child, child_info in children:
-#             flat_result = {'parent_domain': parent, 'child_domain': child}
-#             flat_result.update(child_info)
-#             flat_results.append(flat_result)
-
-#     if flat_results:  # Check if there are results to save
-#         base_filepath = os.path.join(results_folder, filename_base)
-#         filepath = base_filepath + ".csv"
-#         file_index = 1
-
-#         while os.path.exists(filepath):
-#             filepath = f"{base_filepath}{file_index}.csv"
-#             file_index += 1
-
-#         df = pd.DataFrame(flat_results)
-#         df.to_csv(filepath, index=False)
-#         print(f"Results saved to {filepath}")
-#     else:
-#         print("No results to save.")
-
 import os
 import pandas as pd
 
-def save_results_to_csv(results, results_file='results6.csv', batch_index=None):
-    if not os.path.exists(results_file):
-        mode = 'w'  # Create a new file if it doesn't exist
-    else:
-        mode = 'a'  # Append to existing file
-    
+def get_next_available_filename(base_filename):
+    base_name, extension = os.path.splitext(base_filename)
+    counter = 1
+    new_filename = base_filename
+
+    while os.path.exists(new_filename):
+        new_filename = f"{base_name}{counter}{extension}"
+        counter += 1
+
+    return new_filename
+
+def save_results_to_csv(results, results_file, batch_index=None):
     flat_results = []
     for parent, children in results.items():
         for child, child_info in children:
@@ -434,10 +418,13 @@ def save_results_to_csv(results, results_file='results6.csv', batch_index=None):
 
     if flat_results:  # Check if there are results to save
         df = pd.DataFrame(flat_results)
-        df.to_csv(results_file, mode=mode, index=False, header=not os.path.exists(results_file))
-        print(f"Results saved to {results_file}")
+        if not os.path.exists(results_file):
+            df.to_csv(results_file, mode='w', index=False)
+        else:
+            df.to_csv(results_file, mode='a', header=False, index=False)
+        print(f"Batch {batch_index} results appended to {results_file}")
     else:
-        print("No results to save.")
+        print(f"Batch {batch_index} had no results to save.")
 
 import math
 import pandas as pd
@@ -447,9 +434,12 @@ from datetime import datetime
 # Global set to track already processed (parent, child) combinations
 processed_child_domains = set()
 
-def process_child_domains_in_batches(child_domains, parent_domains, selected_features, results_file='results6.csv'):
+def process_child_domains_in_batches(child_domains, parent_domains, selected_features, base_filename='results.csv'):
     batch_size = 1000
     num_batches = math.ceil(len(child_domains) / batch_size)
+
+    # Check if the base file exists and get the next available filename
+    results_file = get_next_available_filename(base_filename) if os.path.exists(base_filename) else base_filename
 
     for batch_index in range(num_batches):
         start_index = batch_index * batch_size
@@ -463,14 +453,10 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
         
         # Separate child and parent domain data
         child_domain_data = {domain: domain_data.get(domain, {}) for domain in batch_child_domains}
-        i=1
         for parent in parent_domains:
             matching_children = []
-            j=1
             for child in batch_child_domains:
                 try:
-                    print(f"site {i}: iteration {j}")
-                    j+=1
                     # Check if (parent, child) combination has already been processed
                     if (parent, child) in processed_child_domains:
                         continue  # Skip this parent-child combination if already processed
@@ -514,7 +500,6 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
                     matching_children.append((child, {'error': error_message}))
                     print(error_message)
                     
-            i+=1
             if matching_children:
                 results[parent] = matching_children
         
@@ -546,4 +531,3 @@ def detect_phishing():
 
 if __name__ == "__main__":
     app.run()
-    
