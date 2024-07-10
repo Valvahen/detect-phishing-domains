@@ -1,7 +1,6 @@
 from flask import jsonify, request, Flask
 from flask_cors import CORS
 import pandas as pd
-from thefuzz import fuzz
 import requests
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -22,11 +21,15 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 import time
+from ultralytics import YOLO
+import cv2
+from flask import send_file
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 ssl._create_default_https_context = ssl._create_unverified_context
 
+# Download NLTK tokenizer data
 nltk.download('stopwords')
 nltk.download('punkt')
 
@@ -44,6 +47,22 @@ title_cache = {}
 
 # Semaphore to limit Selenium driver instances
 driver_semaphore = threading.Semaphore(1)
+
+# Load the YOLO model
+model = YOLO('best.pt')
+
+# Directory to store screenshots
+screenshot_dir = 'blacklist_screenshots_3'
+os.makedirs(screenshot_dir, exist_ok=True)
+
+# Set up Chrome options for headless mode
+chromeOptions = webdriver.ChromeOptions()
+chromeOptions.add_argument('--disable-gpu')
+chromeOptions.add_argument('--ignore-certificate-errors')
+chromeOptions.add_argument("--log-level=1")
+
+# Set up the Selenium WebDriver
+driver = webdriver.Chrome(options=chromeOptions)
 
 # Function to ensure URLs start with http:// or https://
 def ensure_http(url):
@@ -63,6 +82,50 @@ def ensure_http(url):
                 # If both fail, return original url with http:// prefix
                 return http_url
     return url
+
+# Function to take screenshots
+def take_screenshots_from_csv(csv_file):
+    screenshots = []
+    df = pd.read_csv(csv_file)
+    domains = df['domain'].tolist()
+    for domain in domains:
+        try:
+            url = ensure_http(domain)
+            response = requests.options(url)
+            if response.ok or response.status_code == 403:
+                driver.get(url)
+                driver.set_window_size(1920, 1080)  # Set window size for full page capture
+                screenshot_path = os.path.join(screenshot_dir, f"{domain.replace('.', '_')}.png")
+                driver.save_screenshot(screenshot_path)
+                screenshots.append((url, screenshot_path))
+                print(f"Screenshot saved to {screenshot_path}")
+            else:
+                print(f"{domain} is accessible but something is not right. Response code: {response.status_code}")
+        except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as e:
+            print(f"Unable to establish connection: {e}.")
+        except Exception as e:
+            print(f"Error taking screenshot of {domain}: {e}")
+            continue
+    return screenshots
+
+# Predefined list of objects
+predefined_objects = {
+    0: 'aadhar', 1: 'adani', 2: 'airtel', 3: 'assam_sldc', 4: 'axis', 5: 'bbmb',
+    6: 'bescom', 7: 'bob', 8: 'boi', 9: 'bse', 10: 'bses', 11: 'bsnl', 12: 'canara',
+    13: 'cdsl', 14: 'census_india', 15: 'central_bank_of_india', 16: 'cesc', 17: 'cptcl',
+    18: 'csrorgi', 19: 'dgshipping', 20: 'dvc', 21: 'gail', 22: 'grid', 23: 'gst',
+    24: 'hdfc', 25: 'hpsldc', 26: 'iccl', 27: 'icici', 28: 'idbi', 29: 'indian_bank',
+    30: 'iocl', 31: 'isro', 32: 'jio', 33: 'kerala_sldc', 34: 'kotak', 35: 'kptcl',
+    36: 'lic', 37: 'mccil', 38: 'mcx', 39: 'megsldc', 40: 'mpcz', 41: 'mpez', 42: 'mpsldc',
+    43: 'mpwz', 44: 'mse', 45: 'mtnl', 46: 'nic', 47: 'npci', 48: 'npcl', 49: 'npl',
+    50: 'nsdl', 51: 'nse', 52: 'paytm', 53: 'pnb', 54: 'power', 55: 'pstcl', 56: 'rajasthan_sldc',
+    57: 'rbi', 58: 'sbi', 59: 'tamil_nadu_sldc', 60: 'tata_power', 61: 'tata_power_ddl',
+    62: 'telangana_sldc', 63: 'uk_sldc', 64: 'union_bank', 65: 'videocon', 66: 'vodafone',
+    67: 'wbsedcl', 68: 'yes_bank'
+}
+
+# Reverse the predefined_objects dictionary for easy lookup
+predefined_labels = {v: k for k, v in predefined_objects.items()}
 
 # Queue to manage URLs for Selenium content extraction
 url_queue = Queue()
@@ -177,11 +240,8 @@ def clean_text(text):
 
 from langdetect import detect
 
-def remove_stop_words(paragraph, lang):
-    try:
-        stop_words = set(stopwords.words(lang))
-    except Exception:
-        stop_words = set(stopwords.words('english'))  # Default to English stopwords if specific language stopwords are not available
+def remove_stop_words(paragraph, lang='english'):
+    stop_words = set(stopwords.words(lang))
     words = word_tokenize(paragraph)
     filtered_words = [word for word in words if word.lower() not in stop_words]
     return ' '.join(filtered_words)
@@ -424,7 +484,7 @@ def save_results_to_csv(results, results_file, batch_index=None):
             df.to_csv(results_file, mode='a', header=False, index=False)
         print(f"Batch {batch_index} results appended to {results_file}")
     else:
-        print(f"Batch {batch_index} had no results to save.")
+        print("No results to save.")
 
 import math
 import pandas as pd
@@ -438,7 +498,6 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
     batch_size = 1000
     num_batches = math.ceil(len(child_domains) / batch_size)
 
-    # Check if the base file exists and get the next available filename
     results_file = get_next_available_filename(base_filename) if os.path.exists(base_filename) else base_filename
 
     for batch_index in range(num_batches):
@@ -453,10 +512,14 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
         
         # Separate child and parent domain data
         child_domain_data = {domain: domain_data.get(domain, {}) for domain in batch_child_domains}
+        i=1
         for parent in parent_domains:
             matching_children = []
+            j=1
             for child in batch_child_domains:
                 try:
+                    print(f"site {i}: iteration {j}")
+                    j+=1
                     # Check if (parent, child) combination has already been processed
                     if (parent, child) in processed_child_domains:
                         continue  # Skip this parent-child combination if already processed
@@ -500,34 +563,166 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
                     matching_children.append((child, {'error': error_message}))
                     print(error_message)
                     
+            i+=1
             if matching_children:
                 results[parent] = matching_children
         
         # Save results of the current batch to CSV file
         save_results_to_csv(results, results_file, batch_index=batch_index)
     
-    return results
+    return results_file
+
+# Determine status based on conditions
+def determine_status(row, existing_columns):
+    status = 'safe'
+    if 'domain_similarity' in existing_columns and 'title_similarity' in existing_columns and 'content_similarity' in existing_columns:
+        if row['domain_similarity'] > 60 or row['title_similarity'] > 60 or row['content_similarity'] > 60:
+            status = 'suspected'
+        if (row['domain_similarity'] > 60 and row['title_similarity'] > 60) or (row['content_similarity'] > 60 and row['domain_similarity'] > 60) or (row['content_similarity'] > 60 and row['title_similarity'] > 60):
+            status = 'phishing'
+    elif 'domain_similarity' in existing_columns and 'title_similarity' in existing_columns:
+        if row['domain_similarity'] > 60 or row['title_similarity'] > 60:
+            status = 'suspected'
+        if (row['domain_similarity'] > 60 and row['title_similarity'] > 60):
+            status = 'phishing'
+    elif 'domain_similarity' in existing_columns and 'content_similarity' in existing_columns:
+        if row['domain_similarity'] > 60 or row['content_similarity'] > 60:
+            status = 'suspected'
+        if (row['domain_similarity'] > 60 and row['content_similarity'] > 60):
+            status = 'phishing'
+    elif 'title_similarity' in existing_columns and 'content_similarity' in existing_columns:
+        if row['title_similarity'] > 60 or row['content_similarity'] > 60:
+            status = 'suspected'
+        if (row['title_similarity'] > 60 and row['content_similarity'] > 60):
+            status = 'phishing'
+    elif 'domain_similarity' in existing_columns and row['domain_similarity'] > 60:
+        status = 'suspected'
+    elif 'title_similarity' in existing_columns and row['title_similarity'] > 60:
+        status = 'suspected'
+    elif 'content_similarity' in existing_columns and row['content_similarity'] > 60:
+        status = 'suspected'
+    return status
 
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv(r"detect-phishing-domains-api\whitelist.csv")
+    parent_data = pd.read_csv(r"whitelists\whitelist4.csv")
     parent_domains = parent_data['domain'].values
 
     selected_features = json.loads(request.form['features'])
     
-    threshold_ratio = 0
-    
     start_scraping_time = time.time()
-    parent_child_dict = process_child_domains_in_batches(child_domains, parent_domains, selected_features)
+    csv_filename = process_child_domains_in_batches(child_domains, parent_domains, selected_features)
     end_scraping_time = time.time()
     scraping_time = end_scraping_time - start_scraping_time
 
     print(f"Time taken for scraping: {scraping_time} seconds")
-    return jsonify(parent_child_dict)
 
+    # Read the original CSV file
+    df = pd.read_csv(csv_filename)
+
+    # Check which columns exist in the original CSV
+    existing_columns = df.columns.tolist()
+
+    # Create a new DataFrame with parent_domain, child_domain, and status
+    new_df = df[['parent_domain', 'child_domain']].copy()
+    new_df['status'] = df.apply(determine_status, axis=1, existing_columns=existing_columns)
+
+    # Filter out rows with status 'safe'
+    new_df = new_df[new_df['status'] != 'safe']
+
+    # Save the new DataFrame to a new CSV file
+    processed_filename = 'processed.csv'
+    new_df.to_csv(processed_filename, index=False)
+
+    print("Processed CSV file saved successfully.")
+
+    # Generate link to download CSV
+    csv_download_link = f'http://127.0.0.1:5000/download/{csv_filename}'
+    processed_file_download_link = f'http://127.0.0.1:5000/download/{processed_filename}'
+
+    return jsonify({"csv_download_link": csv_download_link, "processed_file_download_link": processed_file_download_link}), 200
+
+@app.route('/detect_logos', methods=['POST'])
+def detect_logos():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if file:
+        file_path = os.path.join(screenshot_dir, file.filename)
+        file.save(file_path)
+
+        # Take screenshots of domains from CSV
+        screenshots = take_screenshots_from_csv(file_path)
+        driver.quit()
+
+        # List to store detection results
+        results = []
+
+        # Detect logos in screenshots
+        for url, screenshot_path in screenshots:
+            if os.path.exists(screenshot_path):
+                # Example evaluation on a validation set
+                results_yolo = model(screenshot_path)
+
+                # Assuming results is an instance of ultralytics.engine.results.Results
+                if isinstance(results_yolo, list) and len(results_yolo) > 0:
+                    detected_objects = results_yolo[0].names
+                    detected_labels = set()  # Store detected labels
+
+                    # Load the image
+                    img = cv2.imread(screenshot_path)
+
+                    # Draw bounding boxes and labels on the image
+                    for box in results_yolo[0].boxes:
+                        # Convert tensor to list
+                        box_coordinates = box.xyxy[0].tolist()
+                        x1, y1, x2, y2 = map(int, box_coordinates)
+                        label = detected_objects[box.cls.item()]
+
+                        # Check if the label is in the predefined objects
+                        if label in predefined_labels:
+                            detected_labels.add(label)
+
+                            # Draw the bounding box
+                            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+                            # Put the label text above the bounding box
+                            cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+                    # Save the image with bounding boxes (if needed)
+                    cv2.imwrite(f"{screenshot_path[:-4]}_with_boxes.png", img)
+
+                    # Add detected labels to results
+                    for label in detected_labels:
+                        results.append({'URL': url, 'Detected Logo': label})
+                else:
+                    print(f"Error: Unexpected results format for {screenshot_path}.")
+            else:
+                print(f"File not found: {screenshot_path}")
+
+        # Save results to CSV
+        df = pd.DataFrame(results)
+        df.to_csv('detected_logos_3.csv', index=False)
+        csv_filename = 'detected_logos_3.csv'
+        csv_path = os.path.join(app.root_path, csv_filename)
+        df.to_csv(csv_path, index=False)
+
+        # Generate link to download CSV
+        csv_download_link = f'http://127.0.0.1:5000/download/{csv_filename}'
+
+        return jsonify({"csv_download_link": csv_download_link}), 200
+    
+@app.route('/download/<filename>', methods=['GET'])
+def download_csv(filename):
+    csv_path = os.path.join(app.root_path, filename)
+    return send_file(csv_path, as_attachment=True)
 
 if __name__ == "__main__":
     app.run()
