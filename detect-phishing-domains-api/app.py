@@ -24,14 +24,15 @@ import time
 from ultralytics import YOLO
 import cv2
 from flask import send_file
+import tqdm
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # Download NLTK tokenizer data
-nltk.download('stopwords')
-nltk.download('punkt')
+# nltk.download('stopwords')
+# nltk.download('punkt')
 
 # Disable SSL certificate verification
 session = requests.Session()
@@ -52,11 +53,12 @@ driver_semaphore = threading.Semaphore(1)
 model = YOLO('best.pt')
 
 # Directory to store screenshots
-screenshot_dir = 'blacklist_screenshots_3'
+screenshot_dir = 'blacklist_screenshots'
 os.makedirs(screenshot_dir, exist_ok=True)
 
 # Set up Chrome options for headless mode
 chromeOptions = webdriver.ChromeOptions()
+chromeOptions.add_argument('--headless')
 chromeOptions.add_argument('--disable-gpu')
 chromeOptions.add_argument('--ignore-certificate-errors')
 chromeOptions.add_argument("--log-level=1")
@@ -241,7 +243,7 @@ def clean_text(text):
 from langdetect import detect
 
 def remove_stop_words(paragraph, lang='english'):
-    stop_words = set(stopwords.words(lang))
+    stop_words = stopwords.words('english')
     words = word_tokenize(paragraph)
     filtered_words = [word for word in words if word.lower() not in stop_words]
     return ' '.join(filtered_words)
@@ -290,7 +292,6 @@ def get_title(url):
     if url in title_cache:
         print(f"Title for {url} already in cache")
         return title_cache[url]
-    
     
     try:
         # Make a GET request to the URL with allow_redirects=True to follow redirects
@@ -470,7 +471,7 @@ def save_results_to_csv(results, results_file, batch_index=None):
     flat_results = []
     for parent, children in results.items():
         for child, child_info in children:
-            flat_result = {'parent_domain': parent, 'child_domain': child}
+            flat_result = {'Legitimate Domain': parent, 'Newly Registered Domain': child}
             flat_result.update(child_info)
             if batch_index is not None:
                 flat_result['batch_index'] = batch_index  # Add batch index if provided
@@ -512,14 +513,11 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
         
         # Separate child and parent domain data
         child_domain_data = {domain: domain_data.get(domain, {}) for domain in batch_child_domains}
-        i=1
-        for parent in parent_domains:
+        
+        for parent in tqdm(parent_domains, desc=f"Processing batch {batch_index+1}/{num_batches}"):
             matching_children = []
-            j=1
-            for child in batch_child_domains:
+            for child in tqdm(batch_child_domains, desc=f"Processing children for parent {parent}", leave=False):
                 try:
-                    print(f"site {i}: iteration {j}")
-                    j+=1
                     # Check if (parent, child) combination has already been processed
                     if (parent, child) in processed_child_domains:
                         continue  # Skip this parent-child combination if already processed
@@ -563,7 +561,6 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
                     matching_children.append((child, {'error': error_message}))
                     print(error_message)
                     
-            i+=1
             if matching_children:
                 results[parent] = matching_children
         
@@ -603,12 +600,25 @@ def determine_status(row, existing_columns):
         status = 'suspected'
     return status
 
+def filter_domain_user_form(data: pd.DataFrame):
+    # Filter rows where 'Operation' column reads 'CREATE'
+    filtered_data = data[data['Operation'] == 'CREATE']
+
+    # Extract the 'Domain User Form' column
+    domain_user_form_data = filtered_data['Domain User Form']
+    
+    return domain_user_form_data
+
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
-    child_domains = file.read().decode('utf-8').splitlines()
+    file_data = pd.read_csv(file)
     
-    parent_data = pd.read_csv(r"whitelists\whitelist4.csv")
+    # Filter the uploaded CSV file
+    filtered_domains = filter_domain_user_form(file_data)
+    child_domains = filtered_domains.tolist()
+
+    parent_data = pd.read_csv(r"whitelist.csv")
     parent_domains = parent_data['domain'].values
 
     selected_features = json.loads(request.form['features'])
