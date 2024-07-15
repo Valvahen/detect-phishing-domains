@@ -24,7 +24,6 @@ import time
 from ultralytics import YOLO
 import cv2
 from flask import send_file
-import tqdm
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -53,7 +52,7 @@ driver_semaphore = threading.Semaphore(1)
 model = YOLO('best.pt')
 
 # Directory to store screenshots
-screenshot_dir = 'blacklist_screenshots'
+screenshot_dir = 'blacklist_screenshots_3'
 os.makedirs(screenshot_dir, exist_ok=True)
 
 # Set up Chrome options for headless mode
@@ -243,7 +242,7 @@ def clean_text(text):
 from langdetect import detect
 
 def remove_stop_words(paragraph, lang='english'):
-    stop_words = stopwords.words('english')
+    stop_words = set(stopwords.words(lang))
     words = word_tokenize(paragraph)
     filtered_words = [word for word in words if word.lower() not in stop_words]
     return ' '.join(filtered_words)
@@ -292,6 +291,7 @@ def get_title(url):
     if url in title_cache:
         print(f"Title for {url} already in cache")
         return title_cache[url]
+    
     
     try:
         # Make a GET request to the URL with allow_redirects=True to follow redirects
@@ -358,6 +358,10 @@ def calculate_domain_similarity(parent, child):
             "net", "my", "the", "best", "top", "pro", "plus", "gov", "free", "biz",
             "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.','credit'
         ]
+
+        # Ensure parent and child are strings
+        parent = str(parent)
+        child = str(child)
 
         # Remove specified substrings
         parent_cleaned = remove_substrings(parent, substrings_to_remove)
@@ -455,6 +459,10 @@ def compare_screenshots(url1, url2):
 
 import os
 import pandas as pd
+import csv
+import socket
+from tqdm import tqdm
+import math
 
 def get_next_available_filename(base_filename):
     base_name, extension = os.path.splitext(base_filename)
@@ -467,11 +475,54 @@ def get_next_available_filename(base_filename):
 
     return new_filename
 
+# Function to read domains from a CSV file
+def read_domains_from_csv(file_path):
+    domains = []
+    with open(file_path, mode='r') as file:
+        csv_reader = csv.DictReader(file)
+        for row in csv_reader:
+            domains.append(row['domain'])
+    return domains
+
+# Function to read known malicious IPs from a CSV file
+def read_malicious_ips_from_csv(file_path):
+    malicious_ips = set()
+    with open(file_path, mode='r') as file:
+        csv_reader = csv.reader(file)
+        for row in csv_reader:
+            malicious_ips.add(row[0])
+    return malicious_ips
+
+# Function to get IP address for a single domain
+def get_ip_address(domain):
+    try:
+        ip_address = socket.gethostbyname(domain)
+        return domain, ip_address
+    except socket.gaierror:
+        return domain, 'Error: Could not resolve domain'
+
+# Function to get IP addresses from a list of domains using threading
+def get_ip_addresses(domains, max_workers=10):
+    domain_ip_map = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Map get_ip_address function to the domains with a progress bar
+        results = list(tqdm(executor.map(get_ip_address, domains), total=len(domains), desc="Resolving IP addresses"))
+    for domain, ip in results:
+        domain_ip_map[domain] = ip
+    return domain_ip_map
+
+# Function to check if an IP address is malicious
+def check_if_malicious(domain_ip_tuple, malicious_ips):
+    domain, ip = domain_ip_tuple
+    is_malicious = 1 if ip in malicious_ips else 0
+    return domain, ip, is_malicious
+
+# Function to save results to CSV
 def save_results_to_csv(results, results_file, batch_index=None):
     flat_results = []
     for parent, children in results.items():
         for child, child_info in children:
-            flat_result = {'Legitimate Domain': parent, 'Newly Registered Domain': child}
+            flat_result = {'parent_domain': parent, 'child_domain': child}
             flat_result.update(child_info)
             if batch_index is not None:
                 flat_result['batch_index'] = batch_index  # Add batch index if provided
@@ -487,86 +538,92 @@ def save_results_to_csv(results, results_file, batch_index=None):
     else:
         print("No results to save.")
 
-import math
-import pandas as pd
-import os
-from datetime import datetime
-
-# Global set to track already processed (parent, child) combinations
-processed_child_domains = set()
-
+# Function to process child domains in batches
 def process_child_domains_in_batches(child_domains, parent_domains, selected_features, base_filename='results.csv'):
     batch_size = 1000
     num_batches = math.ceil(len(child_domains) / batch_size)
 
     results_file = get_next_available_filename(base_filename) if os.path.exists(base_filename) else base_filename
 
+    processed_child_domains = set()  # Track processed child domains
+
     for batch_index in range(num_batches):
         start_index = batch_index * batch_size
         end_index = min((batch_index + 1) * batch_size, len(child_domains))
         batch_child_domains = child_domains[start_index:end_index]
-        
+
         results = {}  # Reset results for each batch
-        
-        # Fetch domain data for this batch
+
+        # Fetch domain data for this batch (mockup function, replace with actual implementation)
         domain_data = fetch_domain_data(batch_child_domains + list(parent_domains), selected_features)
-        
+
         # Separate child and parent domain data
         child_domain_data = {domain: domain_data.get(domain, {}) for domain in batch_child_domains}
-        
+
+        # Path to the known malicious IPs CSV file
+        malicious_ips_file_path = 'known_malicious_IPs.csv'
+
+        # Read known malicious IPs from the CSV file
+        malicious_ips = read_malicious_ips_from_csv(malicious_ips_file_path)
+
+        # Get IP addresses for the domains using threading
+        domain_ip_map = get_ip_addresses(batch_child_domains, max_workers=10)
+
+        # Check if IP addresses are malicious using threading
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            # Map check_if_malicious function to the domain_ip_map with a progress bar
+            results_with_malicious_check = list(tqdm(executor.map(check_if_malicious, domain_ip_map.items(), [malicious_ips]*len(domain_ip_map)), total=len(domain_ip_map), desc="Checking for malicious IPs"))
+
         for parent in tqdm(parent_domains, desc=f"Processing batch {batch_index+1}/{num_batches}"):
             matching_children = []
             for child in tqdm(batch_child_domains, desc=f"Processing children for parent {parent}", leave=False):
                 try:
-                    # Check if (parent, child) combination has already been processed
-                    if (parent, child) in processed_child_domains:
-                        continue  # Skip this parent-child combination if already processed
-
                     result = {}
+
+                    # Example feature calculations (replace with actual logic)
                     if 'domain' in selected_features:
-                        # Calculate domain similarity
                         domain_similarity = calculate_domain_similarity(parent, child)
                         result['domain_similarity'] = domain_similarity
-                    
+
                     if 'content' in selected_features:
-                        # Get content for parent and child domains from pre-fetched data
                         parent_content = domain_data.get(parent, {}).get('content', '')
                         child_content = child_domain_data.get(child, {}).get('content', '')
-                        
-                        # Calculate text similarity
                         content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
                         result['content_similarity'] = content_similarity
-                    
+
                     if 'title' in selected_features:
-                        # Get titles for parent and child domains from pre-fetched data
                         parent_title = domain_data.get(parent, {}).get('title', '')
                         child_title = child_domain_data.get(child, {}).get('title', '')
-                        
-                        # Compare titles
                         title_similarity = compare_titles(parent_title, child_title) if parent_title and child_title else 0.0
                         result['title_similarity'] = title_similarity
 
                     if 'screenshot' in selected_features:
-                        # Compare screenshots using placeholder function
                         screenshot_similarity = compare_screenshots(parent, child)
                         result['screenshot_similarity'] = screenshot_similarity
 
-                    matching_children.append((child, result))    
-                    
+                    # Add malicious IP check result to the result dictionary
+                    for domain_ip_info in results_with_malicious_check:
+                        if domain_ip_info[0] == child:
+                            result['is_malicious'] = domain_ip_info[2]
+                            break
+
+                    # Find matching children
+                    matching_children.append((child, result))
+
                     # Mark (parent, child) combination as processed
                     processed_child_domains.add((parent, child))
-                    
+
                 except Exception as e:
                     error_message = f"Error processing {parent} and {child}: {e}"
                     matching_children.append((child, {'error': error_message}))
                     print(error_message)
-                    
+
             if matching_children:
                 results[parent] = matching_children
-        
+
         # Save results of the current batch to CSV file
         save_results_to_csv(results, results_file, batch_index=batch_index)
-    
+
     return results_file
 
 # Determine status based on conditions
@@ -598,27 +655,19 @@ def determine_status(row, existing_columns):
         status = 'suspected'
     elif 'content_similarity' in existing_columns and row['content_similarity'] > 60:
         status = 'suspected'
+
+    # Check if is_malicious is 1 and set status to phishing
+    if 'is_malicious' in existing_columns and row.get('is_malicious') == 1:
+        status = 'phishing'
+
     return status
-
-def filter_domain_user_form(data: pd.DataFrame):
-    # Filter rows where 'Operation' column reads 'CREATE'
-    filtered_data = data[data['Operation'] == 'CREATE']
-
-    # Extract the 'Domain User Form' column
-    domain_user_form_data = filtered_data['Domain User Form']
-    
-    return domain_user_form_data
 
 @app.route('/', methods=['POST'])
 def detect_phishing():
     file = request.files['file']
-    file_data = pd.read_csv(file)
+    child_domains = file.read().decode('utf-8').splitlines()
     
-    # Filter the uploaded CSV file
-    filtered_domains = filter_domain_user_form(file_data)
-    child_domains = filtered_domains.tolist()
-
-    parent_data = pd.read_csv(r"whitelist.csv")
+    parent_data = pd.read_csv(r"whitelists\whitelist4.csv")
     parent_domains = parent_data['domain'].values
 
     selected_features = json.loads(request.form['features'])
