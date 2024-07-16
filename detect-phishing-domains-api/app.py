@@ -333,7 +333,7 @@ def compare_titles(title1, title2, n=2):
 
 # Function to strip TLD from domain, including multi-part TLDs like ".co.in"
 def strip_tld(domain):
-    multi_part_tlds = ['.co.in', '.org.in', '..in', '.in']
+    multi_part_tlds = ['.co.in', '.org.in', '..in', '.in','.com']
     for tld in multi_part_tlds:
         if domain.endswith(tld):
             return domain[:-len(tld)]
@@ -517,15 +517,20 @@ def check_if_malicious(domain_ip_tuple, malicious_ips):
     is_malicious = 1 if ip in malicious_ips else 0
     return domain, ip, is_malicious
 
+from requests.exceptions import RequestException, Timeout
+import urllib3
+
 # Function to save results to CSV
-def save_results_to_csv(results, results_file, batch_index=None):
+def save_results_to_csv(results, results_file, batch_index=None, domain_sector_map=None):
     flat_results = []
     for parent, children in results.items():
         for child, child_info in children:
-            flat_result = {'parent_domain': parent, 'child_domain': child}
+            flat_result = {'Legitimate Domain': parent, 'Newly Registered Domain': child}
             flat_result.update(child_info)
             if batch_index is not None:
                 flat_result['batch_index'] = batch_index  # Add batch index if provided
+            if domain_sector_map and parent in domain_sector_map:
+                flat_result['sector'] = domain_sector_map[parent]  # Add sector information
             flat_results.append(flat_result)
 
     if flat_results:  # Check if there are results to save
@@ -538,12 +543,53 @@ def save_results_to_csv(results, results_file, batch_index=None):
     else:
         print("No results to save.")
 
+# Disable SSL warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+from urllib.parse import urlparse
+
+# Function to extract domain from URL
+def get_domain_from_url(url):
+    parsed_url = urlparse(url)
+    return parsed_url.netloc
+
+# Function to fetch URLs and check redirects
+def fetch_urls_and_check_redirect(urls, whitelist):
+    results = []
+
+    for url in tqdm(urls, desc="Fetching URLs"):
+        url = ensure_http(url)
+        try:
+            response = requests.get(url, allow_redirects=True, verify=False)
+            final_url = response.url
+            initial_domain = get_domain_from_url(url)
+            final_domain = get_domain_from_url(final_url)
+            if final_domain in whitelist:
+                results.append((url, 1))
+            else:
+                results.append((url, 0))
+        except Timeout as e:
+            print(f"Timeout occurred for URL {url}: {e}")
+            results.append((url, -1))
+        except RequestException as e:
+            print(f"Error checking URL {url}: {e}")
+            results.append((url, -1))
+        except Exception as e:
+            print(f"Unhandled exception for URL {url}: {e}")
+            results.append((url, -1))
+
+    return results
+
 # Function to process child domains in batches
 def process_child_domains_in_batches(child_domains, parent_domains, selected_features, base_filename='results.csv'):
     batch_size = 1000
     num_batches = math.ceil(len(child_domains) / batch_size)
 
     results_file = get_next_available_filename(base_filename) if os.path.exists(base_filename) else base_filename
+
+    # Load the whitelist data to map domains to sectors
+    whitelist_data = pd.read_csv("whitelist.csv")
+    domain_sector_map = dict(zip(whitelist_data['domain'], whitelist_data['sector']))
 
     processed_child_domains = set()  # Track processed child domains
 
@@ -567,12 +613,16 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
         malicious_ips = read_malicious_ips_from_csv(malicious_ips_file_path)
 
         # Get IP addresses for the domains using threading
-        domain_ip_map = get_ip_addresses(batch_child_domains, max_workers=10)
+        domain_ip_map = get_ip_addresses(batch_child_domains, max_workers=100)
 
         # Check if IP addresses are malicious using threading
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
             # Map check_if_malicious function to the domain_ip_map with a progress bar
             results_with_malicious_check = list(tqdm(executor.map(check_if_malicious, domain_ip_map.items(), [malicious_ips]*len(domain_ip_map)), total=len(domain_ip_map), desc="Checking for malicious IPs"))
+
+        # Fetch URLs and check redirects
+        urls_to_check = [f"http://{domain}" for domain in batch_child_domains]  # Assuming HTTP for simplicity
+        # url_results = fetch_urls_and_check_redirect(urls_to_check, parent_domains)
 
         for parent in tqdm(parent_domains, desc=f"Processing batch {batch_index+1}/{num_batches}"):
             matching_children = []
@@ -607,6 +657,12 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
                             result['is_malicious'] = domain_ip_info[2]
                             break
 
+                    # Add URL redirect check result to the result dictionary
+                    # for url_result in url_results:
+                    #     if url_result[0] == f"http://{child}":
+                    #         result['redirects_to_whitelist'] = url_result[1]
+                    #         break
+
                     # Find matching children
                     matching_children.append((child, result))
 
@@ -622,7 +678,7 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
                 results[parent] = matching_children
 
         # Save results of the current batch to CSV file
-        save_results_to_csv(results, results_file, batch_index=batch_index)
+        save_results_to_csv(results, results_file, batch_index=batch_index, domain_sector_map=domain_sector_map)
 
     return results_file
 
@@ -667,7 +723,7 @@ def detect_phishing():
     file = request.files['file']
     child_domains = file.read().decode('utf-8').splitlines()
     
-    parent_data = pd.read_csv(r"whitelists\whitelist4.csv")
+    parent_data = pd.read_csv(r"whitelist.csv")
     parent_domains = parent_data['domain'].values
 
     selected_features = json.loads(request.form['features'])
@@ -686,7 +742,7 @@ def detect_phishing():
     existing_columns = df.columns.tolist()
 
     # Create a new DataFrame with parent_domain, child_domain, and status
-    new_df = df[['parent_domain', 'child_domain']].copy()
+    new_df = df[['Legitimate Domain', 'Newly Registered Domain', 'sector']].copy()
     new_df['status'] = df.apply(determine_status, axis=1, existing_columns=existing_columns)
 
     # Filter out rows with status 'safe'
