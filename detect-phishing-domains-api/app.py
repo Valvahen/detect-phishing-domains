@@ -30,8 +30,8 @@ requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # Download NLTK tokenizer data
-# nltk.download('stopwords')
-# nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('punkt')
 
 # Disable SSL certificate verification
 session = requests.Session()
