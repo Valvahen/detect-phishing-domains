@@ -21,7 +21,6 @@ def extract_website_content(url):
         print(f"Content for {url} already in cache")
         return content_cache[url]
     
-    
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
 
     try:
@@ -67,7 +66,7 @@ def extract_website_content(url):
             return "No content found"
     
     except requests.RequestException as e:
-        # print(f"Error fetching content from {url}: {e}")
+        print(f"Error fetching content from {url}: {e}")
         return "No content found"
 
 def extract_website_content_using_selenium(url):
@@ -113,7 +112,7 @@ def extract_website_content_using_selenium(url):
         return content
     
     except WebDriverException as e:
-        # print(f"Error fetching content from {url} using Selenium: {e}")
+        print(f"Error fetching content from {url} using Selenium: {e}")
         return "No content found"
 
 def clean_text(text):
@@ -127,7 +126,7 @@ def remove_stop_words(paragraph, lang='english'):
     filtered_words = [word for word in words if word.lower() not in stop_words]
     return ' '.join(filtered_words)
 
-def calculate_similarity(paragraph1, paragraph2, n=2):
+def calculate_content_similarity(paragraph1, paragraph2, n=2):
     if paragraph1 == "No content found" or paragraph2 == "No content found":
         return -1
     try:
@@ -162,5 +161,5 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
         
         return similarity_percentage
     except Exception as e:
-        # print(f"Error calculating similarity: {e}")
+        print(f"Error calculating similarity: {e}")
         return -1

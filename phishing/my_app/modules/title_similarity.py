@@ -30,7 +30,7 @@ def get_title(url):
         return title
     
     except requests.RequestException as e:
-        # print(f"Error fetching title from {url}: {e}")
+        print(f"Error fetching title from {url}: {e}")
         return 'No title found'
 
 def compare_titles(title1, title2, n=2):
@@ -47,5 +47,5 @@ def compare_titles(title1, title2, n=2):
         
         return similarity_percentage
     except Exception as e:
-        # print(f"Error comparing titles: {e}")
+        print(f"Error comparing titles: {e}")
         return -1

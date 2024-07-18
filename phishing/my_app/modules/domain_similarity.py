@@ -2,7 +2,7 @@ import textdistance
 
 # Function to strip TLD from domain, including multi-part TLDs like ".co.in"
 def strip_tld(domain):
-    multi_part_tlds = ['.co.in', '.org.in', '..in', '.in']
+    multi_part_tlds = ['.co.in', '.org.in', '..in', '.in', '.com']
     for tld in multi_part_tlds:
         if domain.endswith(tld):
             return domain[:-len(tld)]
@@ -67,5 +67,5 @@ def calculate_domain_similarity(parent, child):
 
         return min(combined_similarity, 100)  # Ensure similarity does not exceed 100
     except Exception as e:
-        # print(f"Error calculating domain similarity: {e}")
+        print(f"Error calculating domain similarity: {e}")
         return -1

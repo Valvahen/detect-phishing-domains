@@ -1,4 +1,4 @@
-from .content_similarity import extract_website_content, extract_website_content_using_selenium, clean_text, remove_stop_words, calculate_similarity
+from .content_similarity import extract_website_content, extract_website_content_using_selenium, clean_text, remove_stop_words, calculate_content_similarity
 from .determine_status import determine_status
 from .domain_similarity import strip_tld, remove_substrings, calculate_domain_similarity
 from .ensure_scheme import ensure_scheme

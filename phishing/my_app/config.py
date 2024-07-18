@@ -22,4 +22,6 @@ title_cache = {}
 # Queue to manage URLs for Selenium content extraction
 url_queue = Queue()
 
-whitelist = "my_app\data\whitelist.csv"
+whitelist = "my_app\\data\\whitelist.csv"
+processed_filename = 'my_app\\data\\processed.csv'
+malicious_ips_file_path = 'my_app\\data\\known_malicious_IPs.csv'

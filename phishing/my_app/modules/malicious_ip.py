@@ -14,11 +14,11 @@ def read_malicious_ips_from_csv(file_path):
 
 # Function to get IP address for a single domain
 def get_ip_address(domain):
-    # try:
-    ip_address = socket.gethostbyname(domain)
-    return domain, ip_address
-    # except socket.gaierror:
-    #     return domain, 'Error: Could not resolve domain'
+    try:
+        ip_address = socket.gethostbyname(domain)
+        return domain, ip_address
+    except socket.gaierror:
+        return domain, 'Error: Could not resolve domain'
 
 # Function to get IP addresses from a list of domains using threading
 def get_ip_addresses(domains, max_workers=100):

@@ -8,7 +8,7 @@ from .modules.determine_status import determine_status
 import os
 import requests
 import ssl
-from .config import content_cache, title_cache, url_queue, whitelist
+from .config import content_cache, title_cache, url_queue, whitelist, processed_filename
 
 # Suppress SSL warnings
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -36,12 +36,12 @@ def detect_phishing():
 
     selected_features = json.loads(request.form['features'])
     
-    start_scraping_time = time.time()
+    start_processing_time = time.time()
     csv_filename = process_child_domains_in_batches(child_domains, parent_domains, selected_features)
-    end_scraping_time = time.time()
-    scraping_time = end_scraping_time - start_scraping_time
+    end_processing_time = time.time()
+    processing_time = end_processing_time - start_processing_time
 
-    print(f"Time taken for scraping: {scraping_time} seconds")
+    print(f"Time taken for processing: {processing_time} seconds")
 
     # Read the original CSV file
     df = pd.read_csv(csv_filename)
@@ -57,7 +57,6 @@ def detect_phishing():
     new_df = new_df[new_df['status'] != 'safe']
 
     # Save the new DataFrame to a new CSV file
-    processed_filename = 'my_app\data\processed.csv'
     new_df.to_csv(processed_filename, index=False)
 
     print("Processed CSV file saved successfully.")

@@ -14,26 +14,26 @@ def fetch_domain_data(domains, features):
         if 'content' in features:
             for content_future in concurrent.futures.as_completed(content_futures):
                 domain = content_futures[content_future]
-                # try:
-                content = content_future.result()
-                if domain in domain_data:   
-                    domain_data[domain]['content'] = content
-                else:
-                    domain_data[domain] = {'content': content}
-                # except Exception as e:
-                    # print(f"Error fetching content for {domain}: {e}")
+                try:
+                    content = content_future.result()
+                    if domain in domain_data:   
+                        domain_data[domain]['content'] = content
+                    else:
+                        domain_data[domain] = {'content': content}
+                except Exception as e:
+                    print(f"Error fetching content for {domain}: {e}")
 
         if 'title' in features:
             for title_future in concurrent.futures.as_completed(title_futures):
                 domain = title_futures[title_future]
-                # try:
-                title = title_future.result()
-                if domain in domain_data:
-                    domain_data[domain]['title'] = title
-                else:
-                    domain_data[domain] = {'title': title}
-                # except Exception as e:
-                #     print(f"Error fetching title for {domain}: {e}")
+                try:
+                    title = title_future.result()
+                    if domain in domain_data:
+                        domain_data[domain]['title'] = title
+                    else:
+                        domain_data[domain] = {'title': title}
+                except Exception as e:
+                    print(f"Error fetching title for {domain}: {e}")
 
     # Process URLs in the queue that require Selenium for content extraction
     while not url_queue.empty():

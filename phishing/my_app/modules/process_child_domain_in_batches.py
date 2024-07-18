@@ -3,13 +3,14 @@ from .fetch_domain_data import fetch_domain_data
 from .malicious_ip import read_malicious_ips_from_csv, get_ip_addresses, check_if_malicious
 from .redirecting import fetch_urls_and_check_redirect
 from .domain_similarity import calculate_domain_similarity
-from .content_similarity import calculate_similarity
+from .content_similarity import calculate_content_similarity
 from .title_similarity import compare_titles
 from .save_results_to_csv import save_results_to_csv
 import concurrent.futures
 import math
 import os
 from tqdm import tqdm
+from ..config import malicious_ips_file_path
 
 # Update the process_child_domains_in_batches function
 def process_child_domains_in_batches(child_domains, parent_domains, selected_features, base_filename='my_app/data/results/results.csv'):
@@ -34,9 +35,6 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
         child_domain_data = {domain: domain_data.get(domain, {}) for domain in batch_child_domains}
 
         if 'ipaddress' in selected_features:
-            # Path to the known malicious IPs CSV file
-            malicious_ips_file_path = 'known_malicious_IPs.csv'
-
             # Read known malicious IPs from the CSV file
             malicious_ips = read_malicious_ips_from_csv(malicious_ips_file_path)
 
@@ -66,7 +64,7 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
                     if 'content' in selected_features:
                         parent_content = domain_data.get(parent, {}).get('content', '')
                         child_content = child_domain_data.get(child, {}).get('content', '')
-                        content_similarity = calculate_similarity(parent_content, child_content) if parent_content and child_content else 0.0
+                        content_similarity = calculate_content_similarity(parent_content, child_content) if parent_content and child_content else 0.0
                         result['Content Similarity'] = content_similarity
 
                     if 'title' in selected_features:
@@ -99,7 +97,7 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
                 except Exception as e:
                     error_message = f"Error processing {parent} and {child}: {e}"
                     matching_children.append((child, {'error': error_message}))
-                    # print(error_message)
+                    print(error_message)
 
             if matching_children:
                 results[parent] = matching_children
