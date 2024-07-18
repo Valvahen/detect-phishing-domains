@@ -12,6 +12,9 @@ from selenium.common.exceptions import WebDriverException
 from langdetect import detect
 import time
 from ..config import content_cache, url_queue
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.common.by import By
 
 def extract_website_content(url):
     dom=url
@@ -72,19 +75,16 @@ def extract_website_content(url):
 def extract_website_content_using_selenium(url):
     url = ensure_scheme(url)
     
-    # Set up Selenium with headless Chrome
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
+    # Set up Selenium with headless Firefox
+    firefox_options = FirefoxOptions()
+    firefox_options.add_argument("--headless")
     
-    # Path to the ChromeDriver
-    driver_path = r"chromedriver-win64/chromedriver.exe"
-    service = Service(driver_path)
+    # Path to the geckodriver executable
+    driver_path = r"path_to_geckodriver/geckodriver.exe"  # Update with your path
+    service = FirefoxService(driver_path)
     
     try:
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Firefox(service=service, options=firefox_options)
         driver.get(url)
         
         # Wait for JavaScript to load the content (adjust as needed)
