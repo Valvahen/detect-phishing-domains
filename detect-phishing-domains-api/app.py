@@ -30,8 +30,8 @@ requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # Download NLTK tokenizer data
-nltk.download('stopwords')
-nltk.download('punkt')
+# nltk.download('stopwords')
+# nltk.download('punkt')
 
 # Disable SSL certificate verification
 session = requests.Session()
@@ -260,11 +260,13 @@ def calculate_similarity(paragraph1, paragraph2, n=2):
             return -1
         
         # Remove stop words from the paragraphs
-        paragraph1_filtered = remove_stop_words(paragraph1, lang=lang_paragraph1)
-        paragraph2_filtered = remove_stop_words(paragraph2, lang=lang_paragraph2)
+        # paragraph1_filtered = remove_stop_words(paragraph1, lang=lang_paragraph1)
+        # paragraph2_filtered = remove_stop_words(paragraph2, lang=lang_paragraph2)
         
         # Concatenate paragraphs
-        combined_paragraphs = [paragraph1_filtered, paragraph2_filtered]
+        # combined_paragraphs = [paragraph1_filtered, paragraph2_filtered]
+
+        combined_paragraphs = [paragraph1, paragraph2]
         
         # Compute TF-IDF scores
         tfidf_vectorizer = TfidfVectorizer(tokenizer=word_tokenize, lowercase=True, norm=None)
@@ -356,7 +358,9 @@ def calculate_domain_similarity(parent, child):
         substrings_to_remove = [
             "xyz", "abc", "123", "online", "site", "shop", "store", "web", "info",
             "net", "my", "the", "best", "top", "pro", "plus", "gov", "free", "biz",
-            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.','credit'
+            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.',
+            "credit","investments","foundation","venture","capital","solutions",
+            "limited","productions","venture","direct"
         ]
 
         # Ensure parent and child are strings
@@ -511,10 +515,9 @@ def get_ip_addresses(domains, max_workers=10):
         domain_ip_map[domain] = ip
     return domain_ip_map
 
-# Function to check if an IP address is malicious
 def check_if_malicious(domain_ip_tuple, malicious_ips):
     domain, ip = domain_ip_tuple
-    is_malicious = 1 if ip in malicious_ips else 0
+    is_malicious = ip if ip in malicious_ips else None
     return domain, ip, is_malicious
 
 from requests.exceptions import RequestException, Timeout
@@ -617,11 +620,11 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
 
         # Check if IP addresses are malicious using threading
         with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
-            # Map check_if_malicious function to the domain_ip_map with a progress bar
-            results_with_malicious_check = list(tqdm(executor.map(check_if_malicious, domain_ip_map.items(), [malicious_ips]*len(domain_ip_map)), total=len(domain_ip_map), desc="Checking for malicious IPs"))
+             # Map check_if_malicious function to the domain_ip_map with a progress bar
+             results_with_malicious_check = list(tqdm(executor.map(check_if_malicious, domain_ip_map.items(), [malicious_ips]*len(domain_ip_map)), total=len(domain_ip_map), desc="Checking for malicious IPs"))
 
-        # Fetch URLs and check redirects
-        urls_to_check = [f"http://{domain}" for domain in batch_child_domains]  # Assuming HTTP for simplicity
+        # # Fetch URLs and check redirects
+        # urls_to_check = [f"http://{domain}" for domain in batch_child_domains]  # Assuming HTTP for simplicity
         # url_results = fetch_urls_and_check_redirect(urls_to_check, parent_domains)
 
         for parent in tqdm(parent_domains, desc=f"Processing batch {batch_index+1}/{num_batches}"):
