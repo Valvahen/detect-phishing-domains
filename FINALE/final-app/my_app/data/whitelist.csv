@@ -2,11 +2,11 @@ domain,sector
 dgshipping.gov.in,Transport
 services.gst.gov.in,BFSI
 www.bseindia.com,BFSI
-www.icclindia.com,Gov
+www.icclindia.com,Govt.
 gailonline.com,PE
 rbi.org.in,BFSI
 www.msei.in,BFSI
-mclear.in,Gov
+mclear.in,Govt.
 www.isro.gov.in,SPE
 www.wbsedcl.in,PE
 nsdl.co.in,BFSI
@@ -15,8 +15,8 @@ iocl.com,PE
 nha.gov.in,Health
 www.mcxindia.com,BFSI
 www.mcxccl.com,BFSI
-www.nplindia.org,Gov
-uidai.gov.in/en/,Gov
+www.nplindia.org,Govt.
+uidai.gov.in/en/,Govt.
 posoco.in/en/,PE
 www.powergrid.in,PE
 sldc.bsptcl.co.in,PE
@@ -27,7 +27,7 @@ www.hdfcbank.com,BFSI
 www.icicibank.com,BFSI
 www.sldcorissa.org.in,PE
 wbsldc.in,PE
-www.py.gov.in,Gov
+www.py.gov.in,Govt.
 www.myvi.in,Telecom
 mtnl.in,Telecom
 www.bsnl.co.in,Telecom
@@ -36,7 +36,7 @@ sldccg.com,PE
 hpsldc.com,PE
 www.sldcguj.com,PE
 www.bbmb.gov.in,PE
-censusindia.gov.in,Gov
+censusindia.gov.in,Govt.
 www.pnbindia.in,BFSI
 www.bankofbaroda.in,BFSI
 www.unionbankofindia.co.in,BFSI
@@ -74,7 +74,7 @@ mpez.co.in,PE
 portal.mpcz.in,PE
 mpwzservices.mpwin.co.in,PE
 noidapower.com,PE
-crsorgi.gov.in,Gov
+crsorgi.gov.in,Govt.
 www.hdfccredila.com,BFSI
 www.icicifoundation.org,BFSI
 www.jio.com,Telecom
@@ -119,9 +119,9 @@ fastag.bank.sbi,BFSI
 www.sbilife.co.in,BFSI
 retail.onlinesbi.sbi,BFSI
 application.axisbank.co.in,BFSI
-www.sci.gov.in,Gov
+www.sci.gov.in,Govt.
 iob.in,BFSI
 indusind.com,BFSI
-nciipc.gov.in,Gov
-ntro.gov.in,Gov
+nciipc.gov.in,Govt.
+ntro.gov.in,Govt.
 main.mohfw.gov.in,Health
