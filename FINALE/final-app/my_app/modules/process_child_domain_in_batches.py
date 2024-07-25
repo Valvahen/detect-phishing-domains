@@ -36,7 +36,7 @@ def process_child_domains_in_batches(child_domains, parent_domains, selected_fea
 
         if 'ipaddress' in selected_features:
             malicious_ips = read_malicious_ips_from_csv(malicious_ips_file_path)
-            domain_ip_map = get_ip_addresses(batch_child_domains, max_workers)
+            domain_ip_map = get_ip_addresses(batch_child_domains)
             with concurrent.futures.ThreadPoolExecutor(max_workers) as executor:
                 results_with_malicious_check = list(tqdm(executor.map(check_if_malicious, domain_ip_map.items(), [malicious_ips]*len(domain_ip_map)), total=len(domain_ip_map), desc="Checking for malicious IPs"))
 
