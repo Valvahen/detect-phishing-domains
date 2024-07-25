@@ -22,7 +22,9 @@ def calculate_domain_similarity(parent, child):
         substrings_to_remove = [
             "xyz", "abc", "123", "online", "site", "shop", "store", "web", "info",
             "net", "my", "the", "best", "top", "pro", "plus", "gov", "free", "biz",
-            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.','credit'
+            "crt", "krt", 'india', 'mart', 'bank', 'customer', 'service', 'www.','credit',
+            "investments","foundation","venture","capital","solutions",
+            "limited","productions","venture","direct"
         ]
 
         parent = str(parent)
